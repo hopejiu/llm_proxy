@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>统计报表 - LLM 中转</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="/static/js/echarts.min.js"></script>
+</head>
+<body class="min-h-screen">
+    <!-- 导航栏 -->
+    <nav class="navbar text-white sticky top-0 z-40">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <div class="flex items-center space-x-3">
+                    <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                    </svg>
+                    <span class="text-xl font-bold">统计报表</span>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <a href="/" class="text-white hover:text-purple-200 transition-colors px-4 py-2 rounded-lg hover:bg-white/10">
+                        配置管理
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 主内容 -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <!-- 概览卡片 -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8 animate-fade-in">
+            <!-- 今日统计 -->
+            <div class="stats-card">
+                <div class="flex items-center justify-between mb-4">
+                    <span class="text-sm font-medium text-gray-500">今日用量</span>
+                    <span class="tag tag-primary">Today</span>
+                </div>
+                <div class="stats-number" id="todayTotal">0</div>
+                <div class="grid grid-cols-4 gap-4 mt-4 text-sm">
+                    <div>
+                        <span class="text-gray-400">Input</span>
+                        <p class="font-semibold text-gray-700" id="todayInput">0</p>
+                    </div>
+                    <div>
+                        <span class="text-gray-400">Output</span>
+                        <p class="font-semibold text-gray-700" id="todayOutput">0</p>
+                    </div>
+                    <div>
+                        <span class="text-gray-400">Cached</span>
+                        <p class="font-semibold text-green-600" id="todayCached">0</p>
+                    </div>
+                    <div>
+                        <span class="text-gray-400">请求</span>
+                        <p class="font-semibold text-gray-700" id="todayCount">0</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 本周统计 -->
+            <div class="stats-card">
+                <div class="flex items-center justify-between mb-4">
+                    <span class="text-sm font-medium text-gray-500">本周用量</span>
+                    <span class="tag tag-primary">Week</span>
+                </div>
+                <div class="stats-number" id="weekTotal">0</div>
+                <div class="grid grid-cols-4 gap-4 mt-4 text-sm">
+                    <div>
+                        <span class="text-gray-400">Input</span>
+                        <p class="font-semibold text-gray-700" id="weekInput">0</p>
+                    </div>
+                    <div>
+                        <span class="text-gray-400">Output</span>
+                        <p class="font-semibold text-gray-700" id="weekOutput">0</p>
+                    </div>
+                    <div>
+                        <span class="text-gray-400">Cached</span>
+                        <p class="font-semibold text-green-600" id="weekCached">0</p>
+                    </div>
+                    <div>
+                        <span class="text-gray-400">请求</span>
+                        <p class="font-semibold text-gray-700" id="weekCount">0</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 总计统计 -->
+            <div class="stats-card">
+                <div class="flex items-center justify-between mb-4">
+                    <span class="text-sm font-medium text-gray-500">总计用量</span>
+                    <span class="tag tag-success">Total</span>
+                </div>
+                <div class="stats-number" id="totalTotal">0</div>
+                <div class="grid grid-cols-4 gap-4 mt-4 text-sm">
+                    <div>
+                        <span class="text-gray-400">Input</span>
+                        <p class="font-semibold text-gray-700" id="totalInput">0</p>
+                    </div>
+                    <div>
+                        <span class="text-gray-400">Output</span>
+                        <p class="font-semibold text-gray-700" id="totalOutput">0</p>
+                    </div>
+                    <div>
+                        <span class="text-gray-400">Cached</span>
+                        <p class="font-semibold text-green-600" id="totalCached">0</p>
+                    </div>
+                    <div>
+                        <span class="text-gray-400">请求</span>
+                        <p class="font-semibold text-gray-700" id="totalCount">0</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 趋势图表 -->
+        <div class="card p-6 mb-8 animate-fade-in" style="animation-delay: 0.1s;">
+            <h2 class="text-lg font-bold text-gray-800 mb-6">近30天趋势</h2>
+            <div id="trendChart" style="width: 100%; height: 500px; min-height: 400px;"></div>
+        </div>
+
+        <!-- 详细数据表格 -->
+        <div class="card p-6 animate-fade-in" style="animation-delay: 0.2s;">
+            <h2 class="text-lg font-bold text-gray-800 mb-4">每日明细</h2>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>日期</th>
+                            <th>请求数</th>
+                            <th>Input Tokens</th>
+                            <th>Output Tokens</th>
+                            <th>Cached Tokens</th>
+                            <th>Total Tokens</th>
+                        </tr>
+                    </thead>
+                    <tbody id="statsTableBody">
+                        <!-- 动态加载 -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 最近请求 -->
+        <div class="card p-6 mt-8 animate-fade-in" style="animation-delay: 0.3s;">
+            <h2 class="text-lg font-bold text-gray-800 mb-4">最近请求</h2>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>时间</th>
+                            <th>Provider</th>
+                            <th>模型</th>
+                            <th>Input</th>
+                            <th>Output</th>
+                            <th>Cached</th>
+                            <th>Total</th>
+                            <th>耗时</th>
+                            <th>状态</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recentLogsBody">
+                        <!-- 动态加载 -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+
+    <script src="/static/js/stats.js"></script>
+</body>
+</html>
