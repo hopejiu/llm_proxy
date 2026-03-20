@@ -102,6 +102,7 @@ function editProvider(id) {
     document.getElementById('baseURL').value = provider.base_url;
     document.getElementById('apiKey').value = provider.api_key;
     document.getElementById('models').value = provider.model;
+    document.getElementById('extraParams').value = provider.extra_params || '';
     
     openModal(true);
 }
@@ -111,11 +112,24 @@ async function saveProvider(event) {
     event.preventDefault();
     
     const id = document.getElementById('providerId').value;
+    const extraParamsStr = document.getElementById('extraParams').value.trim();
+    
+    // 验证JSON格式
+    if (extraParamsStr) {
+        try {
+            JSON.parse(extraParamsStr);
+        } catch (e) {
+            showToast('自定义参数JSON格式错误', 'error');
+            return;
+        }
+    }
+    
     const data = {
         name: document.getElementById('name').value,
         base_url: document.getElementById('baseURL').value,
         api_key: document.getElementById('apiKey').value,
         model: document.getElementById('models').value,
+        extra_params: extraParamsStr,
         is_active: true
     };
     
@@ -228,4 +242,92 @@ function showToast(message, type = 'success') {
         toast.style.transform = 'translateY(-10px)';
         setTimeout(() => toast.remove(), 300);
     }, 3000);
+}
+
+// 导出配置
+async function exportProviders() {
+    try {
+        const response = await fetch('/api/providers/export');
+        const data = await response.json();
+        
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'providers.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        showToast('导出成功', 'success');
+    } catch (error) {
+        console.error('Failed to export providers:', error);
+        showToast('导出失败', 'error');
+    }
+}
+
+// 导入配置
+async function importProviders(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    if (!confirm('导入将覆盖现有配置，是否继续？')) {
+        event.target.value = '';
+        return;
+    }
+    
+    try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        
+        const response = await fetch('/api/providers/import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            showToast(`导入成功，共 ${result.count} 条配置`, 'success');
+            loadProviders();
+        } else {
+            const error = await response.json();
+            showToast(error.error || '导入失败', 'error');
+        }
+    } catch (error) {
+        console.error('Failed to import providers:', error);
+        showToast('导入失败，请检查文件格式', 'error');
+    }
+    
+    event.target.value = '';
+}
+
+// 配置 CodeBuddy models.json
+async function setupCodeBuddy() {
+    if (!confirm('将配置 CodeBuddy 的 models.json 文件，添加本地代理模型配置。是否继续？')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/codebuddy/setup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            if (result.added) {
+                showToast(`配置成功！已添加本地代理模型，路径: ${result.path}`, 'success');
+            } else {
+                showToast(`配置已存在，无需添加。路径: ${result.path}`, 'success');
+            }
+        } else {
+            const error = await response.json();
+            showToast(error.error || '配置失败', 'error');
+        }
+    } catch (error) {
+        console.error('Failed to setup CodeBuddy:', error);
+        showToast('配置失败', 'error');
+    }
 }

@@ -31,22 +31,63 @@ func init() {
 }
 
 type ProxyService struct {
-	providerRepo  *repository.ProviderRepository
+	providerRepo   *repository.ProviderRepository
 	requestLogRepo *repository.RequestLogRepository
-	httpClient    *http.Client
+	httpClient     *http.Client
 }
 
 func NewProxyService(providerRepo *repository.ProviderRepository, requestLogRepo *repository.RequestLogRepository) *ProxyService {
 	return &ProxyService{
-		providerRepo:  providerRepo,
+		providerRepo:   providerRepo,
 		requestLogRepo: requestLogRepo,
-		httpClient:    &http.Client{Timeout: 300 * time.Second},
+		httpClient:     &http.Client{Timeout: 300 * time.Second},
 	}
 }
 
 // GetActiveProviders 获取活跃的Provider
 func (s *ProxyService) GetActiveProviders() ([]model.ProviderConfig, error) {
 	return s.providerRepo.GetActive()
+}
+
+// GetFirstActiveProvider 获取第一个活跃的Provider
+func (s *ProxyService) GetFirstActiveProvider() (*model.ProviderConfig, error) {
+	providers, err := s.providerRepo.GetActive()
+	if err != nil {
+		log.Printf("[ProxyService] 获取活跃Provider失败: %v", err)
+		return nil, fmt.Errorf("failed to get providers: %v", err)
+	}
+	if len(providers) == 0 {
+		return nil, fmt.Errorf("no active provider available")
+	}
+	return &providers[0], nil
+}
+
+// PrepareRequestBody 准备请求体，替换model并添加enable_thinking，合并ExtraParams
+func (s *ProxyService) PrepareRequestBody(reqBody []byte, provider *model.ProviderConfig) []byte {
+	var reqMap map[string]interface{}
+	if err := json.Unmarshal(reqBody, &reqMap); err == nil {
+		reqMap["model"] = provider.Model
+		reqMap["enable_thinking"] = true
+
+		// 合并ExtraParams
+		if provider.ExtraParams != "" {
+			var extraParams map[string]interface{}
+			if err := json.Unmarshal([]byte(provider.ExtraParams), &extraParams); err == nil {
+				for key, value := range extraParams {
+					// 用户自定义参数优先级高于默认参数
+					reqMap[key] = value
+				}
+			} else {
+				log.Printf("[ProxyService] 解析ExtraParams失败: %v", err)
+			}
+		}
+
+		if newBody, err := json.Marshal(reqMap); err == nil {
+			return newBody
+		}
+		log.Printf("[ProxyService] 序列化请求体失败: %v", err)
+	}
+	return reqBody
 }
 
 // ProxyRequest 代理请求到第三方LLM服务（非流式）
@@ -58,37 +99,24 @@ func (s *ProxyService) ProxyRequest(reqBody []byte) (*model.RequestLog, error) {
 	if err := json.Unmarshal(reqBody, &req); err != nil {
 		return nil, fmt.Errorf("invalid request: %v", err)
 	}
-	
-	// 获取活跃的Provider
-	providers, err := s.providerRepo.GetActive()
+
+	// 获取第一个活跃的Provider
+	provider, err := s.GetFirstActiveProvider()
 	if err != nil {
-		log.Printf("[ProxyService] 获取活跃Provider失败: %v", err)
-		return nil, fmt.Errorf("failed to get providers: %v", err)
+		return nil, err
 	}
-	if len(providers) == 0 {
-		return nil, fmt.Errorf("no active provider available")
-	}
-	
-	// 选择第一个Provider
-	provider := providers[0]
-	
-	// 将请求体中的 model 替换为当前激活 provider 的 model
-	var reqMap map[string]interface{}
-	if err := json.Unmarshal(reqBody, &reqMap); err == nil {
-		reqMap["model"] = provider.Model
-		if newBody, err := json.Marshal(reqMap); err == nil {
-			reqBody = newBody
-		}
-	}
-	
+
+	// 准备请求体
+	reqBody = s.PrepareRequestBody(reqBody, provider)
+
 	// 创建请求日志
 	reqLog := &model.RequestLog{
-		ProviderID:   provider.ID,
-		Model:        provider.Model,
-		RequestBody:  string(reqBody),
-		Status:       "error",
+		ProviderID:  provider.ID,
+		Model:       provider.Model,
+		RequestBody: string(reqBody),
+		Status:      "error",
 	}
-	
+
 	// 转发请求
 	targetURL := fmt.Sprintf("%s", strings.TrimSuffix(provider.BaseURL, "/"))
 	httpReq, err := http.NewRequest("POST", targetURL, bytes.NewReader(reqBody))
@@ -98,10 +126,10 @@ func (s *ProxyService) ProxyRequest(reqBody []byte) (*model.RequestLog, error) {
 		s.requestLogRepo.Create(reqLog)
 		return reqLog, err
 	}
-	
+
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", provider.APIKey))
-	
+
 	// 发送请求
 	httpResp, err := s.httpClient.Do(httpReq)
 	if err != nil {
@@ -111,7 +139,7 @@ func (s *ProxyService) ProxyRequest(reqBody []byte) (*model.RequestLog, error) {
 		return reqLog, err
 	}
 	defer httpResp.Body.Close()
-	
+
 	// 处理响应
 	return s.handleNormalResponse(httpResp, reqLog, startTime)
 }
@@ -125,16 +153,16 @@ func (s *ProxyService) handleNormalResponse(resp *http.Response, reqLog *model.R
 		s.requestLogRepo.Create(reqLog)
 		return reqLog, err
 	}
-	
+
 	reqLog.ResponseBody = string(body)
 	reqLog.Duration = time.Since(startTime).Milliseconds()
-	
+
 	if resp.StatusCode != http.StatusOK {
 		reqLog.ErrorMessage = fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(body))
 		s.requestLogRepo.Create(reqLog)
 		return reqLog, fmt.Errorf("provider returned status %d", resp.StatusCode)
 	}
-	
+
 	// 解析响应获取token使用情况
 	var openAIResp model.OpenAIResponse
 	if err := json.Unmarshal(body, &openAIResp); err == nil {
@@ -162,9 +190,9 @@ func (s *ProxyService) handleNormalResponse(resp *http.Response, reqLog *model.R
 			}
 		}
 	}
-	
+
 	reqLog.Status = "success"
 	s.requestLogRepo.Create(reqLog)
-	
+
 	return reqLog, nil
 }

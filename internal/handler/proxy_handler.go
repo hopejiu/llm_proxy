@@ -261,28 +261,15 @@ func (h *ProxyHandler) handleStreamRequest(c *gin.Context, body []byte, startTim
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 
-	providers, err := h.proxyService.GetActiveProviders()
+	provider, err := h.proxyService.GetFirstActiveProvider()
 	if err != nil {
 		h.logRequest(c, body, startTime, "FAILED", err.Error())
 		c.SSEvent("error", gin.H{"error": err.Error()})
 		return
 	}
-	if len(providers) == 0 {
-		h.logRequest(c, body, startTime, "FAILED", "no active provider available")
-		c.SSEvent("error", gin.H{"error": "no active provider available"})
-		return
-	}
 
-	provider := providers[0]
-
-	// 将请求体中的 model 替换为当前激活 provider 的 model
-	var reqMap map[string]interface{}
-	if err := json.Unmarshal(body, &reqMap); err == nil {
-		reqMap["model"] = provider.Model
-		if newBody, err := json.Marshal(reqMap); err == nil {
-			body = newBody
-		}
-	}
+	// 准备请求体
+	body = h.proxyService.PrepareRequestBody(body, provider)
 
 	var req model.OpenAIRequest
 	json.Unmarshal(body, &req)

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	sqlite "github.com/glebarez/sqlite"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
@@ -50,13 +51,37 @@ func main() {
 	fileLogger.Println("配置加载成功")
 
 	// 连接数据库
-	fmt.Println("→ 正在连接 MySQL 数据库...")
-	db, err := gorm.Open(mysql.Open(cfg.DSN()), &gorm.Config{})
-	if err != nil {
-		msg := fmt.Sprintf("数据库连接失败: %v\n\n请检查:\n1. MySQL 是否已启动 (3306端口)\n2. 用户名密码是否正确 (root/wang)\n3. 数据库 llm_proxy 是否存在", err)
-		fmt.Println("✗ " + msg)
-		fileLogger.Printf("数据库连接失败: %v", err)
-		pauseAndExit()
+	var db *gorm.DB
+	if cfg.IsSQLite() {
+		fmt.Println("→ 正在连接 SQLite 数据库...")
+		// 如果 SQLite 文件不存在，先创建空文件
+		dbPath := cfg.SQLiteDSN()
+		if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+			fmt.Printf("  SQLite 文件不存在，正在创建: %s\n", dbPath)
+			if err := os.WriteFile(dbPath, []byte{}, 0644); err != nil {
+				msg := fmt.Sprintf("创建 SQLite 文件失败: %v\n路径: %s", err, dbPath)
+				fmt.Println("✗ " + msg)
+				fileLogger.Printf("创建 SQLite 文件失败: %v", err)
+				pauseAndExit()
+			}
+			fmt.Println("  ✓ SQLite 文件创建成功")
+		}
+		db, err = gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+		if err != nil {
+			msg := fmt.Sprintf("SQLite数据库连接失败: %v\n\n请检查文件路径: %s", err, dbPath)
+			fmt.Println("✗ " + msg)
+			fileLogger.Printf("SQLite数据库连接失败: %v", err)
+			pauseAndExit()
+		}
+	} else {
+		fmt.Println("→ 正在连接 MySQL 数据库...")
+		db, err = gorm.Open(mysql.Open(cfg.DSN()), &gorm.Config{})
+		if err != nil {
+			msg := fmt.Sprintf("数据库连接失败: %v\n\n请检查:\n1. MySQL 是否已启动 (3306端口)\n2. 用户名密码是否正确 (root/wang)\n3. 数据库 llm_proxy 是否存在", err)
+			fmt.Println("✗ " + msg)
+			fileLogger.Printf("数据库连接失败: %v", err)
+			pauseAndExit()
+		}
 	}
 	fmt.Println("✓ 数据库连接成功")
 	fileLogger.Println("数据库连接成功")
@@ -89,7 +114,7 @@ func main() {
 	statsService := service.NewStatsService(requestLogRepo)
 
 	// 初始化 Handler
-	webHandler := handler.NewWebHandler(providerService, statsService)
+	webHandler := handler.NewWebHandler(providerService, statsService, providerRepo, requestLogRepo)
 	proxyHandler := handler.NewProxyHandler(proxyService, requestLogRepo)
 
 	// 启动 80 端口 Web 服务
@@ -202,11 +227,17 @@ func startWebServer(port string, h *handler.WebHandler) *http.Server {
 		api.PUT("/providers/:id", h.UpdateProvider)
 		api.DELETE("/providers/:id", h.DeleteProvider)
 		api.POST("/providers/:id/toggle", h.ToggleProvider)
+		api.GET("/providers/export", h.ExportProviders)
+		api.POST("/providers/import", h.ImportProviders)
+
+		// CodeBuddy 配置
+		api.POST("/codebuddy/setup", h.SetupCodeBuddy)
 
 		// 统计
 		api.GET("/stats", h.GetStats)
 		api.GET("/stats/daily", h.GetDailyStats)
 		api.GET("/logs/recent", h.GetRecentLogs)
+		api.GET("/logs/:id", h.GetLogDetail)
 	}
 
 	server := &http.Server{

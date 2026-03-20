@@ -6,14 +6,15 @@ import (
 
 // ProviderConfig 第三方LLM服务商配置
 type ProviderConfig struct {
-	ID        uint      `json:"id" gorm:"primaryKey"`
-	Name      string    `json:"name" gorm:"size:100;not null"`
-	BaseURL   string    `json:"base_url" gorm:"size:500;not null"`
-	APIKey    string    `json:"api_key" gorm:"size:500;not null"`
-	Model     string    `json:"model" gorm:"size:100"` // 模型名称
-	IsActive  bool      `json:"is_active" gorm:"default:true"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID          uint      `json:"id" gorm:"primaryKey"`
+	Name        string    `json:"name" gorm:"size:100;not null"`
+	BaseURL     string    `json:"base_url" gorm:"size:500;not null"`
+	APIKey      string    `json:"api_key" gorm:"size:500;not null"`
+	Model       string    `json:"model" gorm:"size:100"`                      // 模型名称
+	ExtraParams string    `json:"extra_params" gorm:"type:text"`              // 自定义请求参数JSON
+	IsActive    bool      `json:"is_active" gorm:"default:true"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // RequestLog 请求日志记录

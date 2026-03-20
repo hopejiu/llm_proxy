@@ -316,7 +316,7 @@ function renderTable(stats) {
     
     tbody.innerHTML = stats.map(s => `
         <tr>
-            <td>${s.date}</td>
+            <td>${extractDateString(s.date)}</td>
             <td>${formatNumber(s.request_count)}</td>
             <td>${formatNumber(s.total_input_tokens)}</td>
             <td>${formatNumber(s.total_output_tokens)}</td>
@@ -342,11 +342,14 @@ function renderLogs(logs) {
     const tbody = document.getElementById('recentLogsBody');
     
     if (logs.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="9" class="text-center text-gray-500 py-8">暂无请求记录</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="11" class="text-center text-gray-500 py-8">暂无请求记录</td></tr>';
         return;
     }
     
-    tbody.innerHTML = logs.map(log => `
+    tbody.innerHTML = logs.map(log => {
+        const tokensPerSecond = log.duration > 0 ? (log.output_tokens * 1000 / log.duration).toFixed(1) : '-';
+        const durationSeconds = (log.duration / 1000).toFixed(2);
+        return `
         <tr>
             <td>${formatTime(log.created_at)}</td>
             <td>${log.provider ? escapeHtml(log.provider.name) : '-'}</td>
@@ -355,14 +358,18 @@ function renderLogs(logs) {
             <td>${formatNumber(log.output_tokens)}</td>
             <td class="text-green-600">${formatNumber(log.cached_tokens)}</td>
             <td class="font-semibold text-purple-600">${formatNumber(log.total_tokens)}</td>
-            <td>${log.duration}ms</td>
+            <td>${durationSeconds}s</td>
+            <td class="text-blue-600 font-medium">${tokensPerSecond}</td>
             <td>
                 ${log.status === 'success' 
                     ? '<span class="tag tag-success">成功</span>' 
                     : '<span class="tag tag-error">失败</span>'}
             </td>
+            <td>
+                <button onclick="showLogDetail(${log.id})" class="text-purple-600 hover:text-purple-800 text-sm">查看</button>
+            </td>
         </tr>
-    `).join('');
+    `}).join('');
 }
 
 // 工具函数：格式化数字
@@ -381,7 +388,12 @@ function formatNumber(num) {
 // 工具函数：格式化时间
 function formatTime(timeStr) {
     const date = new Date(timeStr);
-    return `${date.getMonth() + 1}/${date.getDate()} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    const year = date.getFullYear();
+    const month = pad(date.getMonth() + 1);
+    const day = pad(date.getDate());
+    const hour = pad(date.getHours());
+    const minute = pad(date.getMinutes());
+    return `${year}-${month}-${day} ${hour}:${minute}`;
 }
 
 function pad(n) {
@@ -406,3 +418,64 @@ window.addEventListener('resize', () => {
         }
     }, 100);
 });
+
+// 显示日志详情
+async function showLogDetail(id) {
+    try {
+        const response = await fetch(`/api/logs/${id}`);
+        if (!response.ok) {
+            showToast('获取日志详情失败', 'error');
+            return;
+        }
+        const log = await response.json();
+        
+        // 格式化JSON
+        let requestJson = log.request_body || '';
+        let responseContent = log.response_content || '';
+        
+        try {
+            requestJson = JSON.stringify(JSON.parse(requestJson), null, 2);
+        } catch (e) {}
+        
+        document.getElementById('requestBody').textContent = requestJson || '(空)';
+        document.getElementById('responseBody').textContent = responseContent || '(空)';
+        document.getElementById('logDetailModal').classList.add('active');
+    } catch (error) {
+        console.error('Failed to load log detail:', error);
+        showToast('获取日志详情失败', 'error');
+    }
+}
+
+// 关闭日志详情弹窗
+function closeLogDetailModal() {
+    document.getElementById('logDetailModal').classList.remove('active');
+}
+
+// 复制到剪贴板
+function copyToClipboard(elementId) {
+    const element = document.getElementById(elementId);
+    const text = element.textContent;
+    
+    navigator.clipboard.writeText(text).then(() => {
+        showToast('已复制到剪贴板', 'success');
+    }).catch(err => {
+        console.error('Failed to copy:', err);
+        showToast('复制失败', 'error');
+    });
+}
+
+// Toast提示
+function showToast(message, type = 'success') {
+    const toast = document.createElement('div');
+    toast.className = `fixed top-4 right-4 px-6 py-3 rounded-lg shadow-lg text-white font-medium z-50 animate-fade-in ${
+        type === 'success' ? 'bg-green-500' : 'bg-red-500'
+    }`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(-10px)';
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
+}

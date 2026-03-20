@@ -68,3 +68,23 @@ func (r *ProviderRepository) ToggleActive(id uint, isActive bool) error {
 		return tx.Model(&model.ProviderConfig{}).Where("id = ?", id).Update("is_active", isActive).Error
 	})
 }
+
+// DeleteAll 删除所有Provider配置
+func (r *ProviderRepository) DeleteAll() error {
+	return r.db.Where("1 = 1").Delete(&model.ProviderConfig{}).Error
+}
+
+// ImportAll 批量导入Provider配置
+func (r *ProviderRepository) ImportAll(providers []model.ProviderConfig) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		// 清空现有数据
+		if err := tx.Where("1 = 1").Delete(&model.ProviderConfig{}).Error; err != nil {
+			return err
+		}
+		// 批量插入新数据
+		if len(providers) > 0 {
+			return tx.Create(&providers).Error
+		}
+		return nil
+	})
+}

@@ -3,9 +3,13 @@ package config
 import (
 	"fmt"
 	"os"
+
+	"github.com/joho/godotenv"
 )
 
 type Config struct {
+	DBType     string // mysql 或 sqlite
+	DBPath     string // SQLite数据库文件路径
 	DBHost     string
 	DBPort     string
 	DBUser     string
@@ -16,7 +20,12 @@ type Config struct {
 }
 
 func Load() *Config {
+	// 尝试加载.env文件，如果不存在则忽略
+	godotenv.Load()
+
 	return &Config{
+		DBType:     getEnv("DB_TYPE", "mysql"),
+		DBPath:     getEnv("DB_PATH", "llm_proxy.db"),
 		DBHost:     getEnv("DB_HOST", "localhost"),
 		DBPort:     getEnv("DB_PORT", "3306"),
 		DBUser:     getEnv("DB_USER", "root"),
@@ -30,6 +39,16 @@ func Load() *Config {
 func (c *Config) DSN() string {
 	return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
 		c.DBUser, c.DBPassword, c.DBHost, c.DBPort, c.DBName)
+}
+
+// IsSQLite 判断是否使用SQLite数据库
+func (c *Config) IsSQLite() bool {
+	return c.DBType == "sqlite"
+}
+
+// SQLiteDSN 返回SQLite的DSN
+func (c *Config) SQLiteDSN() string {
+	return c.DBPath
 }
 
 func getEnv(key, defaultValue string) string {
