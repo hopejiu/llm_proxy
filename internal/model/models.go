@@ -12,7 +12,7 @@ type ProviderConfig struct {
 	APIKey      string    `json:"api_key" gorm:"size:500;not null"`
 	Model       string    `json:"model" gorm:"size:100"`                      // 模型名称
 	ExtraParams string    `json:"extra_params" gorm:"type:text"`              // 自定义请求参数JSON
-	IsActive    bool      `json:"is_active" gorm:"default:true"`
+	IsActive    bool      `json:"is_active" gorm:"default:false"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }

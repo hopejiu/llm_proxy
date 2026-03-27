@@ -57,6 +57,13 @@ function renderProviders() {
             </div>
             
             <div class="flex justify-end space-x-2 pt-4 border-t border-gray-100">
+                <button onclick="duplicateProvider(${p.id})" 
+                        class="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all" title="复制">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                              d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                    </svg>
+                </button>
                 <button onclick="editProvider(${p.id})" 
                         class="p-2 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-all">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -105,6 +112,40 @@ function editProvider(id) {
     document.getElementById('extraParams').value = provider.extra_params || '';
     
     openModal(true);
+}
+
+// 复制 Provider
+async function duplicateProvider(id) {
+    const provider = providers.find(p => p.id === id);
+    if (!provider) return;
+    
+    const data = {
+        name: provider.name + ' (副本)',
+        base_url: provider.base_url,
+        api_key: provider.api_key,
+        model: provider.model,
+        extra_params: provider.extra_params || '',
+        is_active: false
+    };
+    
+    try {
+        const response = await fetch('/api/providers', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        
+        if (response.ok) {
+            showToast('复制成功', 'success');
+            loadProviders();
+        } else {
+            const error = await response.json();
+            showToast(error.error || '复制失败', 'error');
+        }
+    } catch (error) {
+        console.error('Failed to duplicate provider:', error);
+        showToast('复制失败', 'error');
+    }
 }
 
 // 保存 Provider

@@ -67,7 +67,7 @@ func (s *ProxyService) PrepareRequestBody(reqBody []byte, provider *model.Provid
 	var reqMap map[string]interface{}
 	if err := json.Unmarshal(reqBody, &reqMap); err == nil {
 		reqMap["model"] = provider.Model
-		reqMap["enable_thinking"] = true
+		// reqMap["enable_thinking"] = true
 
 		// 合并ExtraParams
 		if provider.ExtraParams != "" {

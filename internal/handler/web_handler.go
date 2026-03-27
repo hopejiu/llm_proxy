@@ -77,7 +77,7 @@ func (h *WebHandler) CreateProvider(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
+	provider.IsActive = false
 	if err := h.providerService.CreateProvider(&provider); err != nil {
 		log.Printf("[WebHandler] 创建Provider失败: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -352,10 +352,10 @@ func (h *WebHandler) SetupCodeBuddy(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":  message,
-		"path":     modelsFilePath,
-		"exists":   exists,
-		"added":    !exists,
-		"models":   len(config.Models),
+		"message": message,
+		"path":    modelsFilePath,
+		"exists":  exists,
+		"added":   !exists,
+		"models":  len(config.Models),
 	})
 }
