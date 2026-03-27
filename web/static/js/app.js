@@ -130,7 +130,7 @@ async function saveProvider(event) {
         api_key: document.getElementById('apiKey').value,
         model: document.getElementById('models').value,
         extra_params: extraParamsStr,
-        is_active: true
+        is_active: false
     };
     
     try {
