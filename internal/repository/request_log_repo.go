@@ -3,7 +3,7 @@ package repository
 import (
 	"fmt"
 	"llm-proxy/internal/model"
-	"log"
+	"log/slog"
 	"time"
 
 	"gorm.io/gorm"
@@ -27,7 +27,7 @@ func (r *RequestLogRepository) GetByID(id uint) (*model.RequestLog, error) {
 	var requestLog model.RequestLog
 	err := r.db.Preload("Provider").First(&requestLog, id).Error
 	if err != nil {
-		log.Printf("[RequestLogRepository] 根据ID获取日志失败, id=%d: %v", id, err)
+		slog.Error("根据ID获取日志失败", "id", id, "error", err)
 		return nil, err
 	}
 	return &requestLog, nil
@@ -81,10 +81,6 @@ func (r *RequestLogRepository) GetTodayStats() (*model.TokenStats, error) {
 		WHERE created_at BETWEEN ? AND ?
 			AND status = 'success'
 	`, today, startOfDay, endOfDay).Scan(&stats).Error
-	
-	// 调试日志
-	log.Printf("[RequestLogRepository] GetTodayStats: date=%s, input=%d, output=%d, cached=%d, total=%d, count=%d", 
-		stats.Date, stats.TotalInputTokens, stats.TotalOutputTokens, stats.TotalCachedTokens, stats.TotalTokens, stats.RequestCount)
 	
 	return &stats, err
 }

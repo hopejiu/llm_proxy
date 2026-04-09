@@ -19,6 +19,13 @@
                     <span class="text-xl font-bold">统计报表</span>
                 </div>
                 <div class="flex items-center space-x-4">
+                    <div class="flex items-center space-x-2 text-sm">
+                        <span class="text-purple-200">周报模式</span>
+                        <label class="toggle">
+                            <input type="checkbox" id="weeklyModeSwitch" onchange="toggleWeeklyMode()">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
                     <a href="/" class="text-white hover:text-purple-200 transition-colors px-4 py-2 rounded-lg hover:bg-white/10">
                         配置管理
                     </a>
@@ -49,7 +56,8 @@
                     </div>
                     <div>
                         <span class="text-gray-400">Cached</span>
-                        <p class="font-semibold text-green-600" id="todayCached">0</p>
+                        <p class="font-semibold text-green-600 cached-text" id="todayCached">0</p>
+                        <span class="font-semibold text-green-600 cached-text hidden" id="todayCachedInput">0</span>
                     </div>
                     <div>
                         <span class="text-gray-400">请求</span>
@@ -76,7 +84,8 @@
                     </div>
                     <div>
                         <span class="text-gray-400">Cached</span>
-                        <p class="font-semibold text-green-600" id="weekCached">0</p>
+                        <p class="font-semibold text-green-600 cached-text" id="weekCached">0</p>
+                        <span class="font-semibold text-green-600 cached-text hidden" id="weekCachedInput">0</span>
                     </div>
                     <div>
                         <span class="text-gray-400">请求</span>
@@ -103,7 +112,8 @@
                     </div>
                     <div>
                         <span class="text-gray-400">Cached</span>
-                        <p class="font-semibold text-green-600" id="totalCached">0</p>
+                        <p class="font-semibold text-green-600 cached-text" id="totalCached">0</p>
+                        <span class="font-semibold text-green-600 cached-text hidden" id="totalCachedInput">0</span>
                     </div>
                     <div>
                         <span class="text-gray-400">请求</span>

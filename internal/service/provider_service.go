@@ -47,3 +47,8 @@ func (s *ProviderService) DeleteProvider(id uint) error {
 func (s *ProviderService) ToggleProviderStatus(id uint, isActive bool) error {
 	return s.repo.ToggleActive(id, isActive)
 }
+
+// ImportAll 批量导入Provider配置
+func (s *ProviderService) ImportAll(providers []model.ProviderConfig) error {
+	return s.repo.ImportAll(providers)
+}

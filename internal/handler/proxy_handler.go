@@ -1,15 +1,13 @@
 package handler
 
 import (
-	"bufio"
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"llm-proxy/internal/model"
 	"llm-proxy/internal/repository"
 	"llm-proxy/internal/service"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -157,26 +155,23 @@ func parseStreamResponse(sseData string) string {
 	return string(jsonBytes)
 }
 
+// ProxyHandler OpenAI API 处理器
 type ProxyHandler struct {
-	proxyService   *service.ProxyService
-	requestLog     *log.Logger
-	requestLogRepo *repository.RequestLogRepository
+	*BaseHandler // 组合基类
+	requestLog   *os.File
 }
 
+// NewProxyHandler 创建 ProxyHandler 实例
 func NewProxyHandler(proxyService *service.ProxyService, requestLogRepo *repository.RequestLogRepository) *ProxyHandler {
-	logFile, err := os.OpenFile("proxy-requests.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	logFile, err := os.OpenFile("proxy-requests.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, DefaultLogFilePerm)
 	if err != nil {
-		return &ProxyHandler{
-			proxyService:   proxyService,
-			requestLog:     log.New(os.Stdout, "[PROXY] ", log.Ldate|log.Ltime|log.Lmicroseconds),
-			requestLogRepo: requestLogRepo,
-		}
+		slog.Warn("无法创建请求日志文件，使用 stdout", "error", err)
+		logFile = os.Stdout
 	}
 
 	return &ProxyHandler{
-		proxyService:   proxyService,
-		requestLog:     log.New(logFile, "", log.Ldate|log.Ltime|log.Lmicroseconds),
-		requestLogRepo: requestLogRepo,
+		BaseHandler: NewBaseHandler(proxyService, requestLogRepo),
+		requestLog:  logFile,
 	}
 }
 
@@ -191,8 +186,20 @@ func (h *ProxyHandler) logRequest(c *gin.Context, reqBody []byte, startTime time
 	}
 	json.Unmarshal(reqBody, &reqInfo)
 
-	// 记录详细信息
-	logEntry := fmt.Sprintf("[%s] %s | %s | %s | %s | model=%s | stream=%v | %dms | %s | %s | %s",
+	// 使用 slog 结构化记录
+	slog.Info("proxy request",
+		"method", c.Request.Method,
+		"path", c.Request.URL.Path,
+		"clientIP", c.ClientIP(),
+		"model", reqInfo.Model,
+		"stream", reqInfo.Stream,
+		"duration_ms", duration,
+		"status", status,
+		"error", errMsg,
+	)
+
+	// 同时写入请求日志文件（保持原有格式兼容）
+	logEntry := fmt.Sprintf("[%s] %s | %s | %s | %s | model=%s | stream=%v | %dms | %s | %s | %s\n",
 		time.Now().Format("2006-01-02 15:04:05.000"),
 		c.Request.Method,
 		c.Request.URL.Path,
@@ -205,8 +212,7 @@ func (h *ProxyHandler) logRequest(c *gin.Context, reqBody []byte, startTime time
 		errMsg,
 		string(reqBody),
 	)
-
-	h.requestLog.Println(logEntry)
+	h.requestLog.WriteString(logEntry)
 }
 
 // ChatCompletions 中转OpenAI请求
@@ -214,13 +220,12 @@ func (h *ProxyHandler) ChatCompletions(c *gin.Context) {
 	startTime := time.Now()
 
 	// 读取请求体
-	body, err := io.ReadAll(c.Request.Body)
+	body, err := h.ReadBody(c)
 	if err != nil {
-		h.logRequest(c, body, startTime, "ERROR", "failed to read request body")
-		c.JSON(400, gin.H{"error": "failed to read request body"})
+		h.logRequest(c, nil, startTime, "ERROR", "failed to read request body")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
 		return
 	}
-	c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
 
 	// 解析请求检查是否流式
 	var req model.OpenAIRequest
@@ -235,10 +240,10 @@ func (h *ProxyHandler) ChatCompletions(c *gin.Context) {
 
 // handleNormalRequest 处理非流式请求
 func (h *ProxyHandler) handleNormalRequest(c *gin.Context, body []byte, startTime time.Time) {
-	logEntry, err := h.proxyService.ProxyRequest(body)
+	provider, err := h.GetProvider()
 	if err != nil {
 		h.logRequest(c, body, startTime, "FAILED", err.Error())
-		c.JSON(500, gin.H{
+		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": gin.H{
 				"message": err.Error(),
 				"type":    "proxy_error",
@@ -247,110 +252,49 @@ func (h *ProxyHandler) handleNormalRequest(c *gin.Context, body []byte, startTim
 		return
 	}
 
-	// 记录成功日志
-	h.logRequest(c, body, startTime, "SUCCESS", "")
-
-	// 返回原始响应
-	c.Header("Content-Type", "application/json")
-	c.String(200, logEntry.ResponseBody)
-}
-
-// handleStreamRequest 处理流式请求
-func (h *ProxyHandler) handleStreamRequest(c *gin.Context, body []byte, startTime time.Time) {
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-
-	provider, err := h.proxyService.GetFirstActiveProvider()
-	if err != nil {
-		h.logRequest(c, body, startTime, "FAILED", err.Error())
-		c.SSEvent("error", gin.H{"error": err.Error()})
-		return
-	}
-
 	// 准备请求体
-	body = h.proxyService.PrepareRequestBody(body, provider)
+	body = h.PrepareRequestBody(body, provider)
+	reqLog := h.CreateRequestLog(provider, string(body))
 
-	var req model.OpenAIRequest
-	json.Unmarshal(body, &req)
-	reqLog := &model.RequestLog{
-		ProviderID:  provider.ID,
-		Model:       provider.Model,
-		RequestBody: string(body),
-		Status:      "error",
-	}
-
-	targetURL := provider.BaseURL
-	httpReq, err := http.NewRequest("POST", targetURL, bytes.NewReader(body))
+	// 发送非流式请求
+	respBody, err := h.SendRequest(c.Request.Context(), provider.BaseURL, body, provider.APIKey)
 	if err != nil {
+		slog.Error("发送HTTP请求失败", "handler", "ProxyHandler", "error", err)
 		h.logRequest(c, body, startTime, "FAILED", err.Error())
-		c.SSEvent("error", gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"message": err.Error(),
+				"type":    "proxy_error",
+			},
+		})
 		reqLog.ErrorMessage = err.Error()
-		h.requestLogRepo.Create(reqLog)
+		h.SaveRequestLog(reqLog)
 		return
 	}
 
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+provider.APIKey)
-	httpReq.Header.Set("Accept", "text/event-stream")
+	// 解析响应获取 token 使用情况和内容
+	reqLog.ResponseBody = string(respBody)
+	reqLog.Duration = time.Since(startTime).Milliseconds()
 
-	httpClient := &http.Client{Timeout: 300 * time.Second}
-	httpResp, err := httpClient.Do(httpReq)
-	if err != nil {
-		log.Printf("[ProxyHandler] 发送HTTP请求失败: %v", err)
-		h.logRequest(c, body, startTime, "FAILED", err.Error())
-		c.SSEvent("error", gin.H{"error": err.Error()})
-		reqLog.ErrorMessage = err.Error()
-		h.requestLogRepo.Create(reqLog)
-		return
-	}
-	defer httpResp.Body.Close()
+	var openAIResp model.OpenAIResponse
+	if err := json.Unmarshal(respBody, &openAIResp); err == nil {
+		reqLog.InputTokens = openAIResp.Usage.PromptTokens
+		reqLog.OutputTokens = openAIResp.Usage.CompletionTokens
+		reqLog.TotalTokens = openAIResp.Usage.TotalTokens
+		if openAIResp.Usage.PromptTokensDetails != nil {
+			reqLog.CachedTokens = openAIResp.Usage.PromptTokensDetails.CachedTokens
+		}
 
-	if httpResp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(httpResp.Body)
-		errMsg := fmt.Sprintf("HTTP %d: %s", httpResp.StatusCode, string(respBody))
-		h.logRequest(c, body, startTime, "FAILED", errMsg)
-		c.SSEvent("error", gin.H{"error": string(respBody)})
-		reqLog.ErrorMessage = errMsg
-		h.requestLogRepo.Create(reqLog)
-		return
-	}
-
-	h.logRequest(c, body, startTime, "STREAM_START", "")
-
-	var responseBuilder strings.Builder
-	var inputTokens, outputTokens, totalTokens, cachedTokens int
-
-	scanner := bufio.NewScanner(httpResp.Body)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line != "" {
-			responseBuilder.WriteString(line + "\n")
-			// SSE格式要求每条消息后有两个换行符
-			c.Writer.Write([]byte(line + "\n\n"))
-			c.Writer.Flush()
-
-			if strings.HasPrefix(line, "data: ") {
-				data := strings.TrimPrefix(line, "data: ")
-				if data == "[DONE]" {
-					continue
-				}
-				var streamResp map[string]interface{}
-				if err := json.Unmarshal([]byte(data), &streamResp); err == nil {
-					if usage, ok := streamResp["usage"].(map[string]interface{}); ok {
-						if pt, ok := usage["prompt_tokens"].(float64); ok {
-							inputTokens = int(pt)
-						}
-						if ct, ok := usage["completion_tokens"].(float64); ok {
-							outputTokens = int(ct)
-						}
-						if tt, ok := usage["total_tokens"].(float64); ok {
-							totalTokens = int(tt)
-						}
-						// 从 prompt_tokens_details 中提取 cached_tokens
-						if ptd, ok := usage["prompt_tokens_details"].(map[string]interface{}); ok {
-							if cht, ok := ptd["cached_tokens"].(float64); ok {
-								cachedTokens = int(cht)
+		// 提取 thinking 内容和响应内容
+		if len(openAIResp.Choices) > 0 {
+			reqLog.ResponseContent = openAIResp.Choices[0].Message.Content
+			var rawResp map[string]interface{}
+			if err := json.Unmarshal(respBody, &rawResp); err == nil {
+				if choices, ok := rawResp["choices"].([]interface{}); ok && len(choices) > 0 {
+					if choice, ok := choices[0].(map[string]interface{}); ok {
+						if msg, ok := choice["message"].(map[string]interface{}); ok {
+							if reasoning, ok := msg["reasoning_content"].(string); ok && reasoning != "" {
+								reqLog.ThinkingContent = reasoning
 							}
 						}
 					}
@@ -359,8 +303,79 @@ func (h *ProxyHandler) handleStreamRequest(c *gin.Context, body []byte, startTim
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		log.Printf("[ProxyHandler] 读取流式响应失败: %v", err)
+	reqLog.Status = "success"
+	h.SaveRequestLog(reqLog)
+
+	h.logRequest(c, body, startTime, "SUCCESS", "")
+
+	// 返回原始响应
+	c.Header("Content-Type", "application/json")
+	c.String(http.StatusOK, string(respBody))
+}
+
+// handleStreamRequest 处理流式请求
+func (h *ProxyHandler) handleStreamRequest(c *gin.Context, body []byte, startTime time.Time) {
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+
+	provider, err := h.GetProvider()
+	if err != nil {
+		h.logRequest(c, body, startTime, "FAILED", err.Error())
+		c.SSEvent("error", gin.H{"error": err.Error()})
+		return
+	}
+
+	// 准备请求体
+	body = h.PrepareRequestBody(body, provider)
+	reqLog := h.CreateRequestLog(provider, string(body))
+
+	httpResp, err := h.SendStreamRequest(c.Request.Context(), provider.BaseURL, body, provider.APIKey)
+	if err != nil {
+		slog.Error("发送HTTP请求失败", "handler", "ProxyHandler", "error", err)
+		h.logRequest(c, body, startTime, "FAILED", err.Error())
+		c.SSEvent("error", gin.H{"error": err.Error()})
+		reqLog.ErrorMessage = err.Error()
+		h.SaveRequestLog(reqLog)
+		return
+	}
+	defer httpResp.Body.Close()
+
+	h.logRequest(c, body, startTime, "STREAM_START", "")
+
+	var responseBuilder strings.Builder
+	var inputTokens, outputTokens, totalTokens, cachedTokens int
+
+	if err := h.ReadStreamLines(httpResp, func(line string) {
+		responseBuilder.WriteString(line + "\n")
+		// SSE格式要求每条消息后有两个换行符
+		c.Writer.Write([]byte(line + "\n\n"))
+		c.Writer.Flush()
+
+		if strings.HasPrefix(line, "data: ") {
+			data := strings.TrimPrefix(line, "data: ")
+			if data == "[DONE]" {
+				return
+			}
+			var streamResp map[string]interface{}
+			if err := json.Unmarshal([]byte(data), &streamResp); err == nil {
+				in, out, total, cached := h.ExtractUsage(streamResp)
+				if in > 0 {
+					inputTokens = in
+				}
+				if out > 0 {
+					outputTokens = out
+				}
+				if total > 0 {
+					totalTokens = total
+				}
+				if cached > 0 {
+					cachedTokens = cached
+				}
+			}
+		}
+	}); err != nil {
+		slog.Error("读取流式响应失败", "handler", "ProxyHandler", "error", err)
 	}
 
 	reqLog.ResponseBody = responseBuilder.String()
@@ -371,7 +386,7 @@ func (h *ProxyHandler) handleStreamRequest(c *gin.Context, body []byte, startTim
 	reqLog.CachedTokens = cachedTokens
 	reqLog.Duration = time.Since(startTime).Milliseconds()
 	reqLog.Status = "success"
-	h.requestLogRepo.Create(reqLog)
+	h.SaveRequestLog(reqLog)
 
 	h.logRequest(c, body, startTime, "STREAM_END", "")
 }
@@ -380,11 +395,11 @@ func (h *ProxyHandler) handleStreamRequest(c *gin.Context, body []byte, startTim
 func (h *ProxyHandler) Models(c *gin.Context) {
 	startTime := time.Now()
 
-	providers, err := h.proxyService.GetActiveProviders()
+	providers, err := h.GetProviders()
 	if err != nil {
-		log.Printf("[ProxyHandler] 获取活跃Provider失败: %v", err)
+		slog.Error("获取活跃Provider失败", "handler", "ProxyHandler", "error", err)
 		h.logRequest(c, []byte{}, startTime, "FAILED", err.Error())
-		c.JSON(500, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -398,7 +413,7 @@ func (h *ProxyHandler) Models(c *gin.Context) {
 	}
 
 	h.logRequest(c, []byte{}, startTime, "SUCCESS", "")
-	c.JSON(200, gin.H{
+	c.JSON(http.StatusOK, gin.H{
 		"object": "list",
 		"data":   models,
 	})
@@ -414,7 +429,7 @@ func (h *ProxyHandler) NotFound(c *gin.Context) {
 	// 记录 404 请求
 	h.logRequest(c, body, startTime, "NOT_FOUND", fmt.Sprintf("path not found: %s", c.Request.URL.Path))
 
-	c.JSON(404, gin.H{
+	c.JSON(http.StatusNotFound, gin.H{
 		"error": gin.H{
 			"message": fmt.Sprintf("The requested endpoint '%s %s' was not found.", c.Request.Method, c.Request.URL.Path),
 			"type":    "not_found_error",
@@ -433,7 +448,7 @@ func (h *ProxyHandler) MethodNotAllowed(c *gin.Context) {
 	// 记录 405 请求
 	h.logRequest(c, body, startTime, "METHOD_NOT_ALLOWED", fmt.Sprintf("method not allowed: %s %s", c.Request.Method, c.Request.URL.Path))
 
-	c.JSON(405, gin.H{
+	c.JSON(http.StatusMethodNotAllowed, gin.H{
 		"error": gin.H{
 			"message": fmt.Sprintf("Method '%s' is not allowed for endpoint '%s'.", c.Request.Method, c.Request.URL.Path),
 			"type":    "method_not_allowed_error",

@@ -1,7 +1,7 @@
 package service
 
 import (
-	"log"
+	"log/slog"
 	"llm-proxy/internal/model"
 	"llm-proxy/internal/repository"
 )
@@ -21,7 +21,7 @@ func (s *StatsService) GetDashboardStats() (map[string]*model.TokenStats, error)
 	// 今日统计
 	todayStats, err := s.requestLogRepo.GetTodayStats()
 	if err != nil {
-		log.Printf("[StatsService] 获取今日统计失败: %v", err)
+		slog.Error("获取今日统计失败", "error", err)
 		return nil, err
 	}
 	result["today"] = todayStats
@@ -29,7 +29,7 @@ func (s *StatsService) GetDashboardStats() (map[string]*model.TokenStats, error)
 	// 本周统计
 	weekStats, err := s.requestLogRepo.GetWeekStats()
 	if err != nil {
-		log.Printf("[StatsService] 获取本周统计失败: %v", err)
+		slog.Error("获取本周统计失败", "error", err)
 		return nil, err
 	}
 	result["week"] = weekStats
@@ -37,7 +37,7 @@ func (s *StatsService) GetDashboardStats() (map[string]*model.TokenStats, error)
 	// 总计统计
 	totalStats, err := s.requestLogRepo.GetTotalStats()
 	if err != nil {
-		log.Printf("[StatsService] 获取总计统计失败: %v", err)
+		slog.Error("获取总计统计失败", "error", err)
 		return nil, err
 	}
 	result["total"] = totalStats
@@ -53,4 +53,9 @@ func (s *StatsService) GetLast30DaysStats() ([]model.TokenStats, error) {
 // GetRecentLogs 获取最近的请求日志
 func (s *StatsService) GetRecentLogs(limit int) ([]model.RequestLog, error) {
 	return s.requestLogRepo.GetRecent(limit)
+}
+
+// GetLogDetail 获取单条请求日志详情
+func (s *StatsService) GetLogDetail(id uint) (*model.RequestLog, error) {
+	return s.requestLogRepo.GetByID(id)
 }

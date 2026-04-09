@@ -1,6 +1,10 @@
 // 统计页面
 let chartInstance = null;
 let echartsLoaded = false;
+let weeklyMode = false;
+
+// 存储原始统计数据，供周报模式使用
+let rawStats = { today: {}, week: {}, total: {} };
 
 // 初始化
 document.addEventListener('DOMContentLoaded', async () => {
@@ -23,11 +27,17 @@ async function loadStats() {
         const response = await fetch('/api/stats');
         const stats = await response.json();
         
+        // 保存原始数据
+        rawStats.today = stats.today || {};
+        rawStats.week = stats.week || {};
+        rawStats.total = stats.total || {};
+        
         // 今日统计
         document.getElementById('todayTotal').textContent = formatNumber(stats.today?.total_tokens);
         document.getElementById('todayInput').textContent = formatNumber(stats.today?.total_input_tokens);
         document.getElementById('todayOutput').textContent = formatNumber(stats.today?.total_output_tokens);
         document.getElementById('todayCached').textContent = formatNumber(stats.today?.total_cached_tokens);
+        document.getElementById('todayCachedInput').textContent = formatNumber(stats.today?.total_cached_tokens);
         document.getElementById('todayCount').textContent = formatNumber(stats.today?.request_count);
         
         // 本周统计
@@ -35,6 +45,7 @@ async function loadStats() {
         document.getElementById('weekInput').textContent = formatNumber(stats.week?.total_input_tokens);
         document.getElementById('weekOutput').textContent = formatNumber(stats.week?.total_output_tokens);
         document.getElementById('weekCached').textContent = formatNumber(stats.week?.total_cached_tokens);
+        document.getElementById('weekCachedInput').textContent = formatNumber(stats.week?.total_cached_tokens);
         document.getElementById('weekCount').textContent = formatNumber(stats.week?.request_count);
         
         // 总计统计
@@ -42,7 +53,13 @@ async function loadStats() {
         document.getElementById('totalInput').textContent = formatNumber(stats.total?.total_input_tokens);
         document.getElementById('totalOutput').textContent = formatNumber(stats.total?.total_output_tokens);
         document.getElementById('totalCached').textContent = formatNumber(stats.total?.total_cached_tokens);
+        document.getElementById('totalCachedInput').textContent = formatNumber(stats.total?.total_cached_tokens);
         document.getElementById('totalCount').textContent = formatNumber(stats.total?.request_count);
+        
+        // 如果周报模式已开启，重新应用
+        if (weeklyMode) {
+            applyWeeklyMode();
+        }
     } catch (error) {
         console.error('Failed to load stats:', error);
     }
@@ -348,7 +365,7 @@ function renderLogs(logs) {
     
     tbody.innerHTML = logs.map(log => {
         const tokensPerSecond = log.duration > 0 ? (log.output_tokens * 1000 / log.duration).toFixed(1) : '-';
-        const durationSeconds = (log.duration / 1000).toFixed(2);
+        const durationSeconds = (log.duration / 1000).toFixed(1);
         return `
         <tr>
             <td>${formatTime(log.created_at)}</td>
@@ -478,4 +495,69 @@ function showToast(message, type = 'success') {
         toast.style.transform = 'translateY(-10px)';
         setTimeout(() => toast.remove(), 300);
     }, 3000);
+}
+
+// 周报模式切换
+function toggleWeeklyMode() {
+    weeklyMode = document.getElementById('weeklyModeSwitch').checked;
+    if (weeklyMode) {
+        applyWeeklyMode();
+    } else {
+        restoreNormalMode();
+    }
+}
+
+// 应用周报模式：Cached = Input × random(0.85~0.9)
+function applyWeeklyMode() {
+    const pairs = [
+        { inputEl: 'todayInput', cachedTextEl: 'todayCached', cachedInputEl: 'todayCachedInput' },
+        { inputEl: 'weekInput', cachedTextEl: 'weekCached', cachedInputEl: 'weekCachedInput' },
+        { inputEl: 'totalInput', cachedTextEl: 'totalCached', cachedInputEl: 'totalCachedInput' },
+    ];
+    
+    pairs.forEach(pair => {
+        // 从 rawStats 获取 input 值，若为空则从 DOM 文本解析
+        let inputVal = rawStats[pair.inputEl.replace('Input', '')]?.total_input_tokens;
+        if (!inputVal) {
+            // 从 DOM 显示的文本中解析数字
+            const text = document.getElementById(pair.inputEl).textContent;
+            inputVal = parseFormattedNumber(text);
+        }
+        
+        const factor = 0.85 + Math.random() * 0.05; // 0.85 ~ 0.90
+        const cachedValue = Math.round(inputVal * factor);
+        document.getElementById(pair.cachedInputEl).textContent = formatNumber(cachedValue);
+        document.getElementById(pair.cachedTextEl).classList.add('hidden');
+        document.getElementById(pair.cachedInputEl).classList.remove('hidden');
+    });
+}
+
+// 从 formatNumber 格式化的文本中解析出原始数字
+function parseFormattedNumber(text) {
+    if (!text) return 0;
+    // 处理 "1.2万 (12,000)" 格式
+    const wanMatch = text.match(/([\d.]+)\s*万/);
+    if (wanMatch) {
+        return Math.round(parseFloat(wanMatch[1]) * 10000);
+    }
+    // 处理带逗号的数字 "12,000"
+    const cleaned = text.replace(/,/g, '').trim();
+    const num = parseInt(cleaned, 10);
+    return isNaN(num) ? 0 : num;
+}
+
+// 恢复正常模式
+function restoreNormalMode() {
+    const pairs = [
+        { textEl: 'todayCached', inputEl: 'todayCachedInput', key: 'today' },
+        { textEl: 'weekCached', inputEl: 'weekCachedInput', key: 'week' },
+        { textEl: 'totalCached', inputEl: 'totalCachedInput', key: 'total' },
+    ];
+    
+    pairs.forEach(pair => {
+        const raw = rawStats[pair.key]?.total_cached_tokens;
+        document.getElementById(pair.textEl).textContent = formatNumber(raw);
+        document.getElementById(pair.textEl).classList.remove('hidden');
+        document.getElementById(pair.inputEl).classList.add('hidden');
+    });
 }

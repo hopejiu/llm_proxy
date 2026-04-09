@@ -2,7 +2,7 @@ package repository
 
 import (
 	"llm-proxy/internal/model"
-	"log"
+	"log/slog"
 
 	"gorm.io/gorm"
 )
@@ -25,7 +25,7 @@ func (r *ProviderRepository) GetByID(id uint) (*model.ProviderConfig, error) {
 	var provider model.ProviderConfig
 	err := r.db.First(&provider, id).Error
 	if err != nil {
-		log.Printf("[ProviderRepository] 根据ID获取Provider失败, id=%d: %v", id, err)
+		slog.Error("根据ID获取Provider失败", "id", id, "error", err)
 		return nil, err
 	}
 	return &provider, nil

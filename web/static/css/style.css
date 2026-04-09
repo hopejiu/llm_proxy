@@ -300,3 +300,7 @@ input:checked + .toggle-slider:before {
     margin-bottom: 16px;
   }
 }
+
+.cached-text.hidden {
+  display: none;
+}
