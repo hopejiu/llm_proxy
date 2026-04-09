@@ -4,20 +4,25 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"llm-proxy/internal/model"
 	"llm-proxy/internal/repository"
 	"llm-proxy/internal/service"
+	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
 const (
-	DefaultHTTPTimeout = 300 * time.Second
-	DefaultLogFilePerm = 0666
+	DefaultHTTPTimeout       = 300 * time.Second
+	DefaultLogFilePerm       = 0666
+	StreamFirstByteTimeout   = 5 * time.Second
+	StreamMaxRetries         = 3
 )
 
 // BaseHandler 公共基类，封装 Handler 的公共字段和方法
@@ -211,4 +216,167 @@ func (h *BaseHandler) CreateRequestLog(provider *model.ProviderConfig, reqBody s
 		RequestBody: reqBody,
 		Status:      "error",
 	}
+}
+
+// StreamRetryConfig 流式重试配置
+type StreamRetryConfig struct {
+	FirstByteTimeout time.Duration
+	MaxRetries       int
+}
+
+// DefaultStreamRetryConfig 返回默认的流式重试配置
+func DefaultStreamRetryConfig() StreamRetryConfig {
+	return StreamRetryConfig{
+		FirstByteTimeout: StreamFirstByteTimeout,
+		MaxRetries:       StreamMaxRetries,
+	}
+}
+
+// StreamLineProcessor 处理流式响应行的回调函数
+// line: 原始行内容
+// tokens: 当前 token 使用量（可读取）
+// 返回值: 是否应该停止处理（如遇到 [DONE]）
+type StreamLineProcessor func(line string, tokens *StreamTokens) (stop bool)
+
+// StreamTokens 流式请求的 token 使用量
+type StreamTokens struct {
+	InputTokens  int
+	OutputTokens int
+	TotalTokens  int
+	CachedTokens int
+}
+
+// ExecuteStreamWithRetry 执行带超时重试的流式请求
+// 返回: 响应内容构建器, token使用量, 最后错误
+func (h *BaseHandler) ExecuteStreamWithRetry(
+	ctx context.Context,
+	provider *model.ProviderConfig,
+	body []byte,
+	config StreamRetryConfig,
+	processor StreamLineProcessor,
+) (responseBuilder strings.Builder, tokens StreamTokens, lastErr error) {
+	for attempt := 1; attempt <= config.MaxRetries; attempt++ {
+		slog.Info("stream request attempt", "attempt", attempt, "maxRetries", config.MaxRetries)
+
+		httpResp, err := h.SendStreamRequest(ctx, provider.BaseURL, body, provider.APIKey)
+		if err != nil {
+			slog.Error("发送HTTP请求失败", "attempt", attempt, "error", err)
+			lastErr = err
+			continue
+		}
+
+		// 尝试读取流，带首次数据超时检测
+		success, timeout, err := h.readStreamWithFirstByteTimeout(httpResp, &responseBuilder, &tokens, processor, config.FirstByteTimeout)
+		httpResp.Body.Close()
+
+		if success {
+			return responseBuilder, tokens, nil
+		}
+
+		if timeout {
+			slog.Warn("stream首次数据超时，准备重试", "attempt", attempt, "timeout", config.FirstByteTimeout)
+			lastErr = fmt.Errorf("stream first byte timeout after %v", config.FirstByteTimeout)
+			continue
+		}
+
+		slog.Error("读取流式响应失败", "attempt", attempt, "error", err)
+		lastErr = err
+		continue
+	}
+
+	return responseBuilder, tokens, lastErr
+}
+
+// readStreamWithFirstByteTimeout 读取流式响应，检测首次数据超时
+// 返回: success(是否成功完成), timeout(是否因超时退出), err(错误信息)
+func (h *BaseHandler) readStreamWithFirstByteTimeout(
+	httpResp *http.Response,
+	responseBuilder *strings.Builder,
+	tokens *StreamTokens,
+	processor StreamLineProcessor,
+	firstByteTimeout time.Duration,
+) (success bool, timeout bool, err error) {
+	// 创建带超时的 context 用于检测首次数据
+	firstByteCtx, firstByteCancel := context.WithTimeout(context.Background(), firstByteTimeout)
+	defer firstByteCancel()
+
+	// 用于通知首次数据已到达
+	firstByteChan := make(chan struct{}, 1)
+	// 用于通知读取完成
+	doneChan := make(chan error, 1)
+
+	go func() {
+		scanner := bufio.NewScanner(httpResp.Body)
+		firstDataReceived := false
+
+		for scanner.Scan() {
+			line := scanner.Text()
+			if line == "" {
+				continue
+			}
+
+			// 首次收到数据，通知主 goroutine
+			if !firstDataReceived {
+				firstDataReceived = true
+				select {
+				case firstByteChan <- struct{}{}:
+				default:
+				}
+			}
+
+			responseBuilder.WriteString(line + "\n")
+
+			// 提取 token 使用量
+			if strings.HasPrefix(line, "data: ") {
+				data := strings.TrimPrefix(line, "data: ")
+				if data == "[DONE]" {
+					// 调用处理器处理行
+					if processor != nil {
+						if stop := processor(line, tokens); stop {
+							break
+						}
+					}
+					continue
+				}
+				var streamResp map[string]interface{}
+				if err := json.Unmarshal([]byte(data), &streamResp); err == nil {
+					in, out, total, cached := h.ExtractUsage(streamResp)
+					if in > 0 {
+						tokens.InputTokens = in
+					}
+					if out > 0 {
+						tokens.OutputTokens = out
+					}
+					if total > 0 {
+						tokens.TotalTokens = total
+					}
+					if cached > 0 {
+						tokens.CachedTokens = cached
+					}
+				}
+			}
+
+			// 调用处理器处理行
+			if processor != nil {
+				if stop := processor(line, tokens); stop {
+					break
+				}
+			}
+		}
+		doneChan <- scanner.Err()
+	}()
+
+	// 等待首次数据或超时
+	select {
+	case <-firstByteChan:
+		// 首次数据已到达，继续等待读取完成
+		slog.Debug("stream首次数据已到达")
+	case <-firstByteCtx.Done():
+		// 首次数据超时
+		return false, true, nil
+	}
+
+	// 等待读取完成
+	err = <-doneChan
+	return err == nil, false, err
 }

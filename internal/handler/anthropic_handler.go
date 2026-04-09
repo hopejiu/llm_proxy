@@ -102,7 +102,7 @@ func (h *AnthropicHandler) handleNonStreamMessages(c *gin.Context, anthropicReq 
 	c.JSON(http.StatusOK, anthropicResp)
 }
 
-// handleStreamMessages 处理流式请求
+// handleStreamMessages 处理流式请求（支持超时重试）
 func (h *AnthropicHandler) handleStreamMessages(c *gin.Context, anthropicReq *model.AnthropicMessagesRequest, startTime time.Time) {
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -118,151 +118,134 @@ func (h *AnthropicHandler) handleStreamMessages(c *gin.Context, anthropicReq *mo
 	openAIBody, _ := json.Marshal(openAIReq)
 	openAIBody = h.PrepareRequestBody(openAIBody, provider)
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), DefaultHTTPTimeout)
-	defer cancel()
-
-	httpResp, err := h.SendStreamRequest(ctx, provider.BaseURL, openAIBody, provider.APIKey)
-	if err != nil {
-		h.sendAnthropicSSEError(c, err.Error())
-		return
-	}
-	defer httpResp.Body.Close()
-
 	// 流式状态
 	msgID := fmt.Sprintf("msg_%d", time.Now().UnixNano())
 	var fullContent strings.Builder
-	var inputTokens, outputTokens, totalTokens, cachedTokens int
 	contentBlockIndex := 0
 	messageStarted := false
 	contentBlockStarted := false
 
-	var responseBuilder strings.Builder
+	// 使用 base_handler 的 ExecuteStreamWithRetry
+	responseBuilder, tokens, lastErr := h.ExecuteStreamWithRetry(
+		c.Request.Context(),
+		provider,
+		openAIBody,
+		DefaultStreamRetryConfig(),
+		func(line string, currentTokens *StreamTokens) bool {
+			if !strings.HasPrefix(line, "data: ") {
+				return false
+			}
+			data := strings.TrimPrefix(line, "data: ")
+			if data == "[DONE]" {
+				return false
+			}
 
-	h.ReadStreamLines(httpResp, func(line string) {
-		responseBuilder.WriteString(line + "\n")
+			var streamResp map[string]interface{}
+			if err := json.Unmarshal([]byte(data), &streamResp); err != nil {
+				return false
+			}
 
-		if !strings.HasPrefix(line, "data: ") {
-			return
-		}
-		data := strings.TrimPrefix(line, "data: ")
-		if data == "[DONE]" {
-			return
-		}
-
-		var streamResp map[string]interface{}
-		if err := json.Unmarshal([]byte(data), &streamResp); err != nil {
-			return
-		}
-
-		// 提取 usage
-		in, out, total, cached := h.ExtractUsage(streamResp)
-		if in > 0 {
-			inputTokens = in
-		}
-		if out > 0 {
-			outputTokens = out
-		}
-		if total > 0 {
-			totalTokens = total
-		}
-		if cached > 0 {
-			cachedTokens = cached
-		}
-
-		// 提取 delta content
-		deltaContent := ""
-		if choices, ok := streamResp["choices"].([]interface{}); ok && len(choices) > 0 {
-			if choice, ok := choices[0].(map[string]interface{}); ok {
-				if delta, ok := choice["delta"].(map[string]interface{}); ok {
-					if content, ok := delta["content"].(string); ok {
-						deltaContent = content
+			// 提取 delta content
+			deltaContent := ""
+			if choices, ok := streamResp["choices"].([]interface{}); ok && len(choices) > 0 {
+				if choice, ok := choices[0].(map[string]interface{}); ok {
+					if delta, ok := choice["delta"].(map[string]interface{}); ok {
+						if content, ok := delta["content"].(string); ok {
+							deltaContent = content
+						}
 					}
-				}
-				// 检查 finish_reason
-				if finishReason, ok := choice["finish_reason"].(string); ok && finishReason != "" && finishReason != "null" {
-					// 结束当前内容块
-					if contentBlockStarted {
-						h.writeSSE(c, "content_block_stop", map[string]interface{}{
-							"type":  "content_block_stop",
-							"index": contentBlockIndex,
+					// 检查 finish_reason
+					if finishReason, ok := choice["finish_reason"].(string); ok && finishReason != "" && finishReason != "null" {
+						// 结束当前内容块
+						if contentBlockStarted {
+							h.writeSSE(c, "content_block_stop", map[string]interface{}{
+								"type":  "content_block_stop",
+								"index": contentBlockIndex,
+							})
+							contentBlockStarted = false
+						}
+
+						// 发送 message_delta
+						stopReason := "end_turn"
+						if finishReason == "tool_calls" {
+							stopReason = "tool_use"
+						} else if finishReason == "length" {
+							stopReason = "max_tokens"
+						}
+
+						h.writeSSE(c, "message_delta", map[string]interface{}{
+							"type": "message_delta",
+							"delta": map[string]interface{}{
+								"stop_reason": stopReason,
+							},
+							"usage": map[string]interface{}{
+								"output_tokens": currentTokens.OutputTokens,
+							},
 						})
-						contentBlockStarted = false
+
+						// 发送 message_stop
+						h.writeSSE(c, "message_stop", map[string]interface{}{
+							"type": "message_stop",
+						})
+						return false
 					}
-
-					// 发送 message_delta
-					stopReason := "end_turn"
-					if finishReason == "tool_calls" {
-						stopReason = "tool_use"
-					} else if finishReason == "length" {
-						stopReason = "max_tokens"
-					}
-
-					h.writeSSE(c, "message_delta", map[string]interface{}{
-						"type": "message_delta",
-						"delta": map[string]interface{}{
-							"stop_reason": stopReason,
-						},
-						"usage": map[string]interface{}{
-							"output_tokens": outputTokens,
-						},
-					})
-
-					// 发送 message_stop
-					h.writeSSE(c, "message_stop", map[string]interface{}{
-						"type": "message_stop",
-					})
-					return
 				}
 			}
-		}
 
-		if deltaContent == "" {
-			return
-		}
+			if deltaContent == "" {
+				return false
+			}
 
-		// 首次收到内容，发送 message_start
-		if !messageStarted {
-			h.writeSSE(c, "message_start", map[string]interface{}{
-				"type": "message_start",
-				"message": map[string]interface{}{
-					"id":   msgID,
-					"type": "message",
-					"role": "assistant",
-					"content": []interface{}{},
-					"model": provider.Model,
-					"usage": map[string]interface{}{
-						"input_tokens":  inputTokens,
-						"output_tokens": 0,
+			// 首次收到内容，发送 message_start
+			if !messageStarted {
+				h.writeSSE(c, "message_start", map[string]interface{}{
+					"type": "message_start",
+					"message": map[string]interface{}{
+						"id":   msgID,
+						"type": "message",
+						"role": "assistant",
+						"content": []interface{}{},
+						"model": provider.Model,
+						"usage": map[string]interface{}{
+							"input_tokens":  currentTokens.InputTokens,
+							"output_tokens": 0,
+						},
 					},
-				},
-			})
-			messageStarted = true
-		}
+				})
+				messageStarted = true
+			}
 
-		// 开始第一个内容块
-		if !contentBlockStarted {
-			h.writeSSE(c, "content_block_start", map[string]interface{}{
-				"type":  "content_block_start",
+			// 开始第一个内容块
+			if !contentBlockStarted {
+				h.writeSSE(c, "content_block_start", map[string]interface{}{
+					"type":  "content_block_start",
+					"index": contentBlockIndex,
+					"content_block": map[string]interface{}{
+						"type": "text",
+						"text": "",
+					},
+				})
+				contentBlockStarted = true
+			}
+
+			// 发送内容增量
+			fullContent.WriteString(deltaContent)
+			h.writeSSE(c, "content_block_delta", map[string]interface{}{
+				"type":  "content_block_delta",
 				"index": contentBlockIndex,
-				"content_block": map[string]interface{}{
-					"type": "text",
-					"text": "",
+				"delta": map[string]interface{}{
+					"type": "text_delta",
+					"text": deltaContent,
 				},
 			})
-			contentBlockStarted = true
-		}
+			return false
+		},
+	)
 
-		// 发送内容增量
-		fullContent.WriteString(deltaContent)
-		h.writeSSE(c, "content_block_delta", map[string]interface{}{
-			"type":  "content_block_delta",
-			"index": contentBlockIndex,
-			"delta": map[string]interface{}{
-				"type": "text_delta",
-				"text": deltaContent,
-			},
-		})
-	})
+	if lastErr != nil {
+		h.sendAnthropicSSEError(c, lastErr.Error())
+		return
+	}
 
 	// 如果流结束时没有收到 finish_reason，补发结束事件
 	if contentBlockStarted {
@@ -278,7 +261,7 @@ func (h *AnthropicHandler) handleStreamMessages(c *gin.Context, anthropicReq *mo
 				"stop_reason": "end_turn",
 			},
 			"usage": map[string]interface{}{
-				"output_tokens": outputTokens,
+				"output_tokens": tokens.OutputTokens,
 			},
 		})
 		h.writeSSE(c, "message_stop", map[string]interface{}{
@@ -292,10 +275,10 @@ func (h *AnthropicHandler) handleStreamMessages(c *gin.Context, anthropicReq *mo
 		RequestBody:     string(openAIBody),
 		ResponseBody:    responseBuilder.String(),
 		ResponseContent: fullContent.String(),
-		InputTokens:     inputTokens,
-		OutputTokens:    outputTokens,
-		TotalTokens:     totalTokens,
-		CachedTokens:    cachedTokens,
+		InputTokens:     tokens.InputTokens,
+		OutputTokens:    tokens.OutputTokens,
+		TotalTokens:     tokens.TotalTokens,
+		CachedTokens:    tokens.CachedTokens,
 		Status:          "success",
 		Duration:        time.Since(startTime).Milliseconds(),
 	}

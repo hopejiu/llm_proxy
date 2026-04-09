@@ -15,8 +15,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
-
-// parseStreamResponse 解析 SSE 流式响应，提取完整内容
 // 返回格式化的可读 JSON
 func parseStreamResponse(sseData string) string {
 	var contentBuilder strings.Builder
@@ -313,7 +311,7 @@ func (h *ProxyHandler) handleNormalRequest(c *gin.Context, body []byte, startTim
 	c.String(http.StatusOK, string(respBody))
 }
 
-// handleStreamRequest 处理流式请求
+// handleStreamRequest 处理流式请求（支持超时重试）
 func (h *ProxyHandler) handleStreamRequest(c *gin.Context, body []byte, startTime time.Time) {
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -330,64 +328,38 @@ func (h *ProxyHandler) handleStreamRequest(c *gin.Context, body []byte, startTim
 	body = h.PrepareRequestBody(body, provider)
 	reqLog := h.CreateRequestLog(provider, string(body))
 
-	httpResp, err := h.SendStreamRequest(c.Request.Context(), provider.BaseURL, body, provider.APIKey)
-	if err != nil {
-		slog.Error("发送HTTP请求失败", "handler", "ProxyHandler", "error", err)
-		h.logRequest(c, body, startTime, "FAILED", err.Error())
-		c.SSEvent("error", gin.H{"error": err.Error()})
-		reqLog.ErrorMessage = err.Error()
+	// 使用 base_handler 的 ExecuteStreamWithRetry
+	responseBuilder, tokens, lastErr := h.ExecuteStreamWithRetry(
+		c.Request.Context(),
+		provider,
+		body,
+		DefaultStreamRetryConfig(),
+		func(line string, _ *StreamTokens) bool {
+			// SSE格式要求每条消息后有两个换行符
+			c.Writer.Write([]byte(line + "\n\n"))
+			c.Writer.Flush()
+			return false
+		},
+	)
+
+	if lastErr != nil {
+		h.logRequest(c, body, startTime, "FAILED", lastErr.Error())
+		c.SSEvent("error", gin.H{"error": lastErr.Error()})
+		reqLog.ErrorMessage = lastErr.Error()
 		h.SaveRequestLog(reqLog)
 		return
 	}
-	defer httpResp.Body.Close()
 
-	h.logRequest(c, body, startTime, "STREAM_START", "")
-
-	var responseBuilder strings.Builder
-	var inputTokens, outputTokens, totalTokens, cachedTokens int
-
-	if err := h.ReadStreamLines(httpResp, func(line string) {
-		responseBuilder.WriteString(line + "\n")
-		// SSE格式要求每条消息后有两个换行符
-		c.Writer.Write([]byte(line + "\n\n"))
-		c.Writer.Flush()
-
-		if strings.HasPrefix(line, "data: ") {
-			data := strings.TrimPrefix(line, "data: ")
-			if data == "[DONE]" {
-				return
-			}
-			var streamResp map[string]interface{}
-			if err := json.Unmarshal([]byte(data), &streamResp); err == nil {
-				in, out, total, cached := h.ExtractUsage(streamResp)
-				if in > 0 {
-					inputTokens = in
-				}
-				if out > 0 {
-					outputTokens = out
-				}
-				if total > 0 {
-					totalTokens = total
-				}
-				if cached > 0 {
-					cachedTokens = cached
-				}
-			}
-		}
-	}); err != nil {
-		slog.Error("读取流式响应失败", "handler", "ProxyHandler", "error", err)
-	}
-
+	// 成功完成
 	reqLog.ResponseBody = responseBuilder.String()
 	reqLog.ResponseContent = parseStreamResponse(responseBuilder.String())
-	reqLog.InputTokens = inputTokens
-	reqLog.OutputTokens = outputTokens
-	reqLog.TotalTokens = totalTokens
-	reqLog.CachedTokens = cachedTokens
+	reqLog.InputTokens = tokens.InputTokens
+	reqLog.OutputTokens = tokens.OutputTokens
+	reqLog.TotalTokens = tokens.TotalTokens
+	reqLog.CachedTokens = tokens.CachedTokens
 	reqLog.Duration = time.Since(startTime).Milliseconds()
 	reqLog.Status = "success"
 	h.SaveRequestLog(reqLog)
-
 	h.logRequest(c, body, startTime, "STREAM_END", "")
 }
 

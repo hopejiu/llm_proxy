@@ -7,7 +7,6 @@ import (
 	"llm-proxy/internal/model"
 	"llm-proxy/internal/repository"
 	"llm-proxy/internal/service"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -116,7 +115,7 @@ func (h *OllamaHandler) handleNonStreamChat(c *gin.Context, ollamaReq *model.Oll
 	c.JSON(http.StatusOK, ollamaResp)
 }
 
-// handleStreamChat 处理流式聊天请求
+// handleStreamChat 处理流式聊天请求（支持超时重试）
 func (h *OllamaHandler) handleStreamChat(c *gin.Context, ollamaReq *model.OllamaChatRequest, startTime time.Time) {
 	c.Header("Content-Type", "application/x-ndjson")
 	c.Header("Cache-Control", "no-cache")
@@ -132,52 +131,41 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, ollamaReq *model.Ollama
 	openAIBody, _ := json.Marshal(openAIReq)
 	openAIBody = h.PrepareRequestBody(openAIBody, provider)
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), DefaultHTTPTimeout)
-	defer cancel()
-
-	httpResp, err := h.SendStreamRequest(ctx, provider.BaseURL, openAIBody, provider.APIKey)
-	if err != nil {
-		h.sendOllamaStreamError(c, err.Error())
-		return
-	}
-	defer httpResp.Body.Close()
-
-	var responseBuilder strings.Builder
 	var fullContent strings.Builder
-	var inputTokens, outputTokens int
 
-	if err := h.ReadStreamLines(httpResp, func(line string) {
-		responseBuilder.WriteString(line + "\n")
+	// 使用 base_handler 的 ExecuteStreamWithRetry
+	responseBuilder, tokens, lastErr := h.ExecuteStreamWithRetry(
+		c.Request.Context(),
+		provider,
+		openAIBody,
+		DefaultStreamRetryConfig(),
+		func(line string, _ *StreamTokens) bool {
+			if strings.HasPrefix(line, "data: ") {
+				data := strings.TrimPrefix(line, "data: ")
+				if data == "[DONE]" {
+					return false
+				}
 
-		if strings.HasPrefix(line, "data: ") {
-			data := strings.TrimPrefix(line, "data: ")
-			if data == "[DONE]" {
-				return
+				var streamResp map[string]interface{}
+				if err := json.Unmarshal([]byte(data), &streamResp); err != nil {
+					return false
+				}
+
+				ollamaChunk := h.convertOpenAIStreamToOllama(streamResp, provider.Model)
+				fullContent.WriteString(ollamaChunk.Message.Content)
+
+				chunkBytes, _ := json.Marshal(ollamaChunk)
+				c.Writer.Write(chunkBytes)
+				c.Writer.Write([]byte("\n"))
+				c.Writer.Flush()
 			}
+			return false
+		},
+	)
 
-			var streamResp map[string]interface{}
-			if err := json.Unmarshal([]byte(data), &streamResp); err != nil {
-				return
-			}
-
-			ollamaChunk := h.convertOpenAIStreamToOllama(streamResp, provider.Model)
-			fullContent.WriteString(ollamaChunk.Message.Content)
-
-			in, out, _, _ := h.ExtractUsage(streamResp)
-			if in > 0 {
-				inputTokens = in
-			}
-			if out > 0 {
-				outputTokens = out
-			}
-
-			chunkBytes, _ := json.Marshal(ollamaChunk)
-			c.Writer.Write(chunkBytes)
-			c.Writer.Write([]byte("\n"))
-			c.Writer.Flush()
-		}
-	}); err != nil {
-		slog.Error("读取流式响应失败", "handler", "OllamaHandler", "error", err)
+	if lastErr != nil {
+		h.sendOllamaStreamError(c, lastErr.Error())
+		return
 	}
 
 	finalResp := model.OllamaChatResponse{
@@ -187,8 +175,8 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, ollamaReq *model.Ollama
 		Done:            true,
 		DoneReason:      "stop",
 		TotalDuration:   time.Since(startTime).Nanoseconds(),
-		PromptEvalCount: inputTokens,
-		EvalCount:       outputTokens,
+		PromptEvalCount: tokens.InputTokens,
+		EvalCount:       tokens.OutputTokens,
 	}
 	finalBytes, _ := json.Marshal(finalResp)
 	c.Writer.Write(finalBytes)
@@ -201,9 +189,9 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, ollamaReq *model.Ollama
 		RequestBody:     string(openAIBody),
 		ResponseBody:    responseBuilder.String(),
 		ResponseContent: fullContent.String(),
-		InputTokens:     inputTokens,
-		OutputTokens:    outputTokens,
-		TotalTokens:     inputTokens + outputTokens,
+		InputTokens:     tokens.InputTokens,
+		OutputTokens:    tokens.OutputTokens,
+		TotalTokens:     tokens.InputTokens + tokens.OutputTokens,
 		Status:          "success",
 		Duration:        time.Since(startTime).Milliseconds(),
 	}
