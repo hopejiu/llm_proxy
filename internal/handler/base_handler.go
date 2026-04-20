@@ -19,10 +19,11 @@ import (
 )
 
 const (
-	DefaultHTTPTimeout       = 300 * time.Second
-	DefaultLogFilePerm       = 0666
-	StreamFirstByteTimeout   = 5 * time.Second
-	StreamMaxRetries         = 3
+	DefaultHTTPTimeout     = 300 * time.Second
+	DefaultLogFilePerm     = 0666
+	StreamFirstByteTimeout = 5 * time.Second
+	StreamMaxRetries       = 10
+	RetryDelayBase         = 500 * time.Millisecond
 )
 
 // BaseHandler 公共基类，封装 Handler 的公共字段和方法
@@ -256,35 +257,60 @@ func (h *BaseHandler) ExecuteStreamWithRetry(
 	processor StreamLineProcessor,
 ) (responseBuilder strings.Builder, tokens StreamTokens, lastErr error) {
 	for attempt := 1; attempt <= config.MaxRetries; attempt++ {
-		slog.Info("stream request attempt", "attempt", attempt, "maxRetries", config.MaxRetries)
+		attemptStartTime := time.Now()
+		
+		if attempt == 1 {
+			slog.Info("开始流式请求", "provider", provider.Name, "model", provider.Model)
+		} else {
+			// 重试延迟：次数 * 0.5s
+			retryDelay := time.Duration(attempt) * RetryDelayBase
+			slog.Warn("流式请求失败，正在重试", "provider", provider.Name, "model", provider.Model, "attempt", attempt, "maxRetries", config.MaxRetries, "delay", retryDelay)
+			sleepStart := time.Now()
+			time.Sleep(retryDelay)
+			slog.Debug("重试延迟完成", "actual_delay", time.Since(sleepStart), "expected_delay", retryDelay)
+		}
 
+		// 发送HTTP请求
+		httpStartTime := time.Now()
 		httpResp, err := h.SendStreamRequest(ctx, provider.BaseURL, body, provider.APIKey)
+		httpDuration := time.Since(httpStartTime)
+		
 		if err != nil {
-			slog.Error("发送HTTP请求失败", "attempt", attempt, "error", err)
+			slog.Error("发送HTTP请求失败", "provider", provider.Name, "attempt", attempt, "duration", httpDuration, "error", err)
 			lastErr = err
 			continue
 		}
+		slog.Debug("HTTP连接建立成功", "provider", provider.Name, "attempt", attempt, "duration", httpDuration)
 
 		// 尝试读取流，带首次数据超时检测
 		success, timeout, err := h.readStreamWithFirstByteTimeout(httpResp, &responseBuilder, &tokens, processor, config.FirstByteTimeout)
 		httpResp.Body.Close()
 
+		attemptDuration := time.Since(attemptStartTime)
+		
 		if success {
+			slog.Info("流式请求成功", "provider", provider.Name, "attempt", attempt, "total_duration", attemptDuration)
 			return responseBuilder, tokens, nil
 		}
 
 		if timeout {
-			slog.Warn("stream首次数据超时，准备重试", "attempt", attempt, "timeout", config.FirstByteTimeout)
+			slog.Warn("首次数据超时", "provider", provider.Name, "attempt", attempt, "timeout", config.FirstByteTimeout, "total_duration", attemptDuration)
 			lastErr = fmt.Errorf("stream first byte timeout after %v", config.FirstByteTimeout)
 			continue
 		}
 
-		slog.Error("读取流式响应失败", "attempt", attempt, "error", err)
+		slog.Error("读取流式响应失败", "provider", provider.Name, "attempt", attempt, "duration", attemptDuration, "error", err)
 		lastErr = err
 		continue
 	}
 
 	return responseBuilder, tokens, lastErr
+}
+
+// StreamError 流式响应中的错误
+type StreamError struct {
+	Code    interface{} `json:"code"`
+	Message string      `json:"message"`
 }
 
 // readStreamWithFirstByteTimeout 读取流式响应，检测首次数据超时
@@ -304,6 +330,8 @@ func (h *BaseHandler) readStreamWithFirstByteTimeout(
 	firstByteChan := make(chan struct{}, 1)
 	// 用于通知读取完成
 	doneChan := make(chan error, 1)
+	// 用于传递检测到的流式错误
+	streamErrChan := make(chan StreamError, 1)
 
 	go func() {
 		scanner := bufio.NewScanner(httpResp.Body)
@@ -340,6 +368,16 @@ func (h *BaseHandler) readStreamWithFirstByteTimeout(
 				}
 				var streamResp map[string]interface{}
 				if err := json.Unmarshal([]byte(data), &streamResp); err == nil {
+					// 检测流式响应中的错误
+					if streamErr := h.detectStreamError(streamResp); streamErr != nil {
+						select {
+						case streamErrChan <- *streamErr:
+						default:
+						}
+						doneChan <- fmt.Errorf("stream error: code=%v, message=%s", streamErr.Code, streamErr.Message)
+						return
+					}
+
 					in, out, total, cached := h.ExtractUsage(streamResp)
 					if in > 0 {
 						tokens.InputTokens = in
@@ -367,16 +405,59 @@ func (h *BaseHandler) readStreamWithFirstByteTimeout(
 	}()
 
 	// 等待首次数据或超时
+	firstByteStartTime := time.Now()
 	select {
 	case <-firstByteChan:
 		// 首次数据已到达，继续等待读取完成
-		slog.Debug("stream首次数据已到达")
+		slog.Debug("stream首次数据已到达", "wait_duration", time.Since(firstByteStartTime))
 	case <-firstByteCtx.Done():
 		// 首次数据超时
+		slog.Warn("stream首次数据等待超时", "timeout", firstByteTimeout, "waited", time.Since(firstByteStartTime))
 		return false, true, nil
 	}
 
 	// 等待读取完成
+	readStartTime := time.Now()
 	err = <-doneChan
+	readDuration := time.Since(readStartTime)
+	
+	if err == nil {
+		slog.Debug("stream读取完成", "read_duration", readDuration)
+	} else {
+		slog.Debug("stream读取出错", "read_duration", readDuration, "error", err)
+	}
+	
 	return err == nil, false, err
+}
+
+// detectStreamError 检测流式响应中的错误
+func (h *BaseHandler) detectStreamError(data map[string]interface{}) *StreamError {
+	// 检查 OpenAI 格式的错误
+	if errMap, ok := data["error"].(map[string]interface{}); ok {
+		streamErr := &StreamError{}
+		if code, ok := errMap["code"]; ok {
+			streamErr.Code = code
+		}
+		if msg, ok := errMap["message"].(string); ok {
+			streamErr.Message = msg
+		}
+		// 如果有错误码或错误消息，返回错误
+		if streamErr.Code != nil || streamErr.Message != "" {
+			return streamErr
+		}
+	}
+
+	// 检查其他格式的错误（如 error_code, error_msg）
+	if errorCode, ok := data["error_code"].(string); ok {
+		streamErr := &StreamError{
+			Code:    errorCode,
+			Message: "",
+		}
+		if errorMsg, ok := data["error_msg"].(string); ok {
+			streamErr.Message = errorMsg
+		}
+		return streamErr
+	}
+
+	return nil
 }

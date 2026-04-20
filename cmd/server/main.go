@@ -82,6 +82,15 @@ func main() {
 		pauseAndExit()
 	}
 
+	// 删除旧的外键约束（不再使用外键关联）
+	if db.Migrator().HasConstraint(&model.RequestLog{}, "fk_request_logs_provider") {
+		if err := db.Migrator().DropConstraint(&model.RequestLog{}, "fk_request_logs_provider"); err != nil {
+			slog.Warn("删除外键约束失败，可能已不存在", "error", err)
+		} else {
+			slog.Info("已删除旧的外键约束 fk_request_logs_provider")
+		}
+	}
+
 	fmt.Println("✓ 数据库表初始化完成")
 	slog.Info("数据库表初始化完成")
 
@@ -227,6 +236,7 @@ func startWebServer(port string, h *handler.WebHandler) *http.Server {
 		// 统计
 		api.GET("/stats", h.GetStats)
 		api.GET("/stats/daily", h.GetDailyStats)
+		api.GET("/stats/hourly", h.GetTodayHourlyStats)
 		api.GET("/logs/recent", h.GetRecentLogs)
 		api.GET("/logs/:id", h.GetLogDetail)
 	}

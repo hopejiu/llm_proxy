@@ -1,7 +1,9 @@
 // 统计页面
 let chartInstance = null;
+let hourlyChartInstance = null;
 let echartsLoaded = false;
 let weeklyMode = false;
+let autoRefreshInterval = null;
 
 // 存储原始统计数据，供周报模式使用
 let rawStats = { today: {}, week: {}, total: {} };
@@ -10,6 +12,7 @@ let rawStats = { today: {}, week: {}, total: {} };
 document.addEventListener('DOMContentLoaded', async () => {
     loadStats();
     loadRecentLogs();
+    loadHourlyStats();
     
     // 先加载 ECharts，再渲染图表
     try {
@@ -78,6 +81,17 @@ async function loadDailyStats() {
         renderTable(stats); // 表格显示原始数据
     } catch (error) {
         console.error('Failed to load daily stats:', error);
+    }
+}
+
+// 加载今日分时统计
+async function loadHourlyStats() {
+    try {
+        const response = await fetch('/api/stats/hourly');
+        const stats = await response.json();
+        renderHourlyChart(stats);
+    } catch (error) {
+        console.error('Failed to load hourly stats:', error);
     }
 }
 
@@ -322,6 +336,129 @@ function renderChart(stats) {
     chartInstance.setOption(option);
 }
 
+// 渲染今日分时图表
+function renderHourlyChart(stats) {
+    const chartDom = document.getElementById('hourlyChart');
+    
+    // 销毁旧图表
+    if (hourlyChartInstance) {
+        hourlyChartInstance.dispose();
+    }
+    
+    hourlyChartInstance = echarts.init(chartDom);
+    
+    // 生成24小时的数据，填充缺失的小时
+    const hourData = [];
+    const tokenData = [];
+    const requestData = [];
+    
+    for (let i = 0; i < 24; i++) {
+        const hourStat = stats.find(s => s.hour === i);
+        hourData.push(`${i}:00`);
+        tokenData.push(hourStat ? hourStat.total_tokens : 0);
+        requestData.push(hourStat ? hourStat.request_count : 0);
+    }
+    
+    const option = {
+        tooltip: {
+            trigger: 'axis',
+            axisPointer: {
+                type: 'shadow'
+            },
+            formatter: function(params) {
+                let result = params[0].axisValue + '<br/>';
+                params.forEach(item => {
+                    result += `${item.marker} ${item.seriesName}: ${item.value.toLocaleString()}<br/>`;
+                });
+                return result;
+            }
+        },
+        legend: {
+            data: ['Token消耗', '请求次数'],
+            bottom: 0
+        },
+        grid: {
+            left: '3%',
+            right: '4%',
+            bottom: '12%',
+            top: '10%',
+            containLabel: true
+        },
+        xAxis: {
+            type: 'category',
+            data: hourData,
+            axisLabel: {
+                interval: 2
+            }
+        },
+        yAxis: [
+            {
+                type: 'value',
+                name: 'Token',
+                position: 'left',
+                axisLabel: {
+                    formatter: function(value) {
+                        if (value >= 10000) {
+                            return (value / 10000).toFixed(0) + '万';
+                        }
+                        return value;
+                    }
+                }
+            },
+            {
+                type: 'value',
+                name: '请求次数',
+                position: 'right',
+                axisLabel: {
+                    formatter: function(value) {
+                        if (value >= 1000) {
+                            return (value / 1000).toFixed(0) + 'k';
+                        }
+                        return value;
+                    }
+                }
+            }
+        ],
+        series: [
+            {
+                name: 'Token消耗',
+                type: 'bar',
+                yAxisIndex: 0,
+                data: tokenData,
+                itemStyle: {
+                    color: {
+                        type: 'linear',
+                        x: 0, y: 0, x2: 0, y2: 1,
+                        colorStops: [
+                            { offset: 0, color: '#7C3AED' },
+                            { offset: 1, color: '#A78BFA' }
+                        ]
+                    },
+                    borderRadius: [4, 4, 0, 0]
+                }
+            },
+            {
+                name: '请求次数',
+                type: 'line',
+                yAxisIndex: 1,
+                data: requestData,
+                smooth: true,
+                symbol: 'circle',
+                symbolSize: 6,
+                itemStyle: {
+                    color: '#F59E0B'
+                },
+                lineStyle: {
+                    color: '#F59E0B',
+                    width: 2
+                }
+            }
+        ]
+    };
+    
+    hourlyChartInstance.setOption(option);
+}
+
 // 渲染表格
 function renderTable(stats) {
     const tbody = document.getElementById('statsTableBody');
@@ -410,7 +547,8 @@ function formatTime(timeStr) {
     const day = pad(date.getDate());
     const hour = pad(date.getHours());
     const minute = pad(date.getMinutes());
-    return `${year}-${month}-${day} ${hour}:${minute}`;
+    const second = pad(date.getSeconds());
+    return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
 }
 
 function pad(n) {
@@ -432,6 +570,9 @@ window.addEventListener('resize', () => {
     resizeTimeout = setTimeout(() => {
         if (chartInstance) {
             chartInstance.resize();
+        }
+        if (hourlyChartInstance) {
+            hourlyChartInstance.resize();
         }
     }, 100);
 });
@@ -560,4 +701,26 @@ function restoreNormalMode() {
         document.getElementById(pair.textEl).classList.remove('hidden');
         document.getElementById(pair.inputEl).classList.add('hidden');
     });
+}
+
+// 自动刷新切换
+function toggleAutoRefresh() {
+    const enabled = document.getElementById('autoRefreshSwitch').checked;
+    
+    if (enabled) {
+        // 开启自动刷新，每10秒刷新一次
+        autoRefreshInterval = setInterval(() => {
+            loadStats();
+            loadRecentLogs();
+            loadHourlyStats();
+        }, 10000);
+        showToast('已开启自动刷新（每10秒）', 'success');
+    } else {
+        // 关闭自动刷新
+        if (autoRefreshInterval) {
+            clearInterval(autoRefreshInterval);
+            autoRefreshInterval = null;
+        }
+        showToast('已关闭自动刷新', 'success');
+    }
 }

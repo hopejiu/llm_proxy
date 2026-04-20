@@ -248,6 +248,17 @@ func (h *WebHandler) GetLogDetail(c *gin.Context) {
 	c.JSON(http.StatusOK, logDetail)
 }
 
+// GetTodayHourlyStats 获取今日分时统计
+func (h *WebHandler) GetTodayHourlyStats(c *gin.Context) {
+	stats, err := h.statsService.GetTodayHourlyStats()
+	if err != nil {
+		slog.Error("获取今日分时统计失败", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, stats)
+}
+
 // CodeBuddyModel CodeBuddy models.json 中的模型结构
 type CodeBuddyModel struct {
 	ID                string  `json:"id"`

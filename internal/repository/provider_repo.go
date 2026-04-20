@@ -50,9 +50,15 @@ func (r *ProviderRepository) Update(provider *model.ProviderConfig) error {
 	return r.db.Save(provider).Error
 }
 
-// Delete 删除Provider
+// Delete 删除Provider（先将关联日志的ProviderID置为999，再删除Provider）
 func (r *ProviderRepository) Delete(id uint) error {
-	return r.db.Delete(&model.ProviderConfig{}, id).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		// 将关联的请求日志的ProviderID置为999
+		if err := tx.Model(&model.RequestLog{}).Where("provider_id = ?", id).Update("provider_id", 999).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&model.ProviderConfig{}, id).Error
+	})
 }
 
 // ToggleActive 切换启用状态（激活一个时禁用其他所有）
@@ -77,6 +83,10 @@ func (r *ProviderRepository) DeleteAll() error {
 // ImportAll 批量导入Provider配置
 func (r *ProviderRepository) ImportAll(providers []model.ProviderConfig) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
+		// 将所有请求日志的ProviderID置为999
+		if err := tx.Model(&model.RequestLog{}).Where("provider_id != ?", 999).Update("provider_id", 999).Error; err != nil {
+			return err
+		}
 		// 清空现有数据
 		if err := tx.Where("1 = 1").Delete(&model.ProviderConfig{}).Error; err != nil {
 			return err

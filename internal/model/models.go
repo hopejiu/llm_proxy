@@ -21,7 +21,7 @@ type ProviderConfig struct {
 type RequestLog struct {
 	ID              uint      `json:"id" gorm:"primaryKey"`
 	ProviderID      uint      `json:"provider_id"`
-	Provider        ProviderConfig `json:"provider" gorm:"foreignKey:ProviderID"`
+	Provider        ProviderConfig `json:"provider" gorm:"-"` // 不再使用外键关联，手动处理
 	Model           string    `json:"model" gorm:"size:100"`
 	InputTokens     int       `json:"input_tokens"`
 	OutputTokens    int       `json:"output_tokens"`

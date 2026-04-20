@@ -59,3 +59,8 @@ func (s *StatsService) GetRecentLogs(limit int) ([]model.RequestLog, error) {
 func (s *StatsService) GetLogDetail(id uint) (*model.RequestLog, error) {
 	return s.requestLogRepo.GetByID(id)
 }
+
+// GetTodayHourlyStats 获取今日分时统计
+func (s *StatsService) GetTodayHourlyStats() ([]repository.HourlyStats, error) {
+	return s.requestLogRepo.GetTodayHourlyStats()
+}
