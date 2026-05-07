@@ -139,6 +139,15 @@ func (s *ProxyService) PrepareRequestBody(reqBody []byte, provider *model.Provid
 			}
 		}
 
+		// 流式请求时注入 stream_options 确保上游 API 返回 usage 信息
+		if stream, ok := reqMap["stream"].(bool); ok && stream {
+			if _, exists := reqMap["stream_options"]; !exists {
+				reqMap["stream_options"] = map[string]interface{}{
+					"include_usage": true,
+				}
+			}
+		}
+
 		if newBody, err := json.Marshal(reqMap); err == nil {
 			return newBody
 		}

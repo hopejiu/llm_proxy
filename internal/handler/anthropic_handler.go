@@ -109,6 +109,7 @@ func (h *AnthropicHandler) handleDirectNonStreamMessages(c *gin.Context, body []
 
 	if err := json.Unmarshal(respBody, &anthropicResp); err == nil {
 		reqLog.ResponseContent = extractTextFromAnthropicContent(anthropicResp.Content)
+		reqLog.ThinkingContent = extractThinkingFromAnthropicContent(anthropicResp.Content)
 		reqLog.InputTokens = anthropicResp.Usage.InputTokens
 		reqLog.OutputTokens = anthropicResp.Usage.OutputTokens
 		reqLog.TotalTokens = anthropicResp.Usage.InputTokens + anthropicResp.Usage.OutputTokens
@@ -160,6 +161,8 @@ func (h *AnthropicHandler) handleDirectStreamMessages(c *gin.Context, body []byt
 
 	// 直接透传 SSE 流
 	var fullContent strings.Builder
+	var thinkingContent strings.Builder
+	var responseBuilder strings.Builder
 	var inputTokens, outputTokens, cachedTokens int
 
 	flusher, ok := c.Writer.(http.Flusher)
@@ -172,6 +175,9 @@ func (h *AnthropicHandler) handleDirectStreamMessages(c *gin.Context, body []byt
 	for scanner.Scan() {
 		line := scanner.Text()
 
+		// 累积原始 SSE 数据用于日志记录
+		responseBuilder.WriteString(line + "\n")
+
 		// 直接写入客户端
 		c.Writer.Write([]byte(line + "\n"))
 
@@ -180,7 +186,7 @@ func (h *AnthropicHandler) handleDirectStreamMessages(c *gin.Context, body []byt
 			data := strings.TrimPrefix(line, "data: ")
 			var event map[string]interface{}
 			if json.Unmarshal([]byte(data), &event) == nil {
-				h.extractAnthropicStreamStats(event, &fullContent, &inputTokens, &outputTokens, &cachedTokens)
+				h.extractAnthropicStreamStats(event, &fullContent, &thinkingContent, &inputTokens, &outputTokens, &cachedTokens)
 			}
 		}
 
@@ -194,7 +200,9 @@ func (h *AnthropicHandler) handleDirectStreamMessages(c *gin.Context, body []byt
 		ProviderID:      provider.ID,
 		Model:           provider.Model,
 		RequestBody:     string(body),
+		ResponseBody:    responseBuilder.String(),
 		ResponseContent: fullContent.String(),
+		ThinkingContent: thinkingContent.String(),
 		InputTokens:     inputTokens,
 		OutputTokens:    outputTokens,
 		TotalTokens:     inputTokens + outputTokens,
@@ -206,7 +214,7 @@ func (h *AnthropicHandler) handleDirectStreamMessages(c *gin.Context, body []byt
 }
 
 // extractAnthropicStreamStats 从 Anthropic 流式事件中提取统计信息
-func (h *AnthropicHandler) extractAnthropicStreamStats(event map[string]interface{}, fullContent *strings.Builder, inputTokens, outputTokens, cachedTokens *int) {
+func (h *AnthropicHandler) extractAnthropicStreamStats(event map[string]interface{}, fullContent *strings.Builder, thinkingContent *strings.Builder, inputTokens, outputTokens, cachedTokens *int) {
 	eventType, _ := event["type"].(string)
 
 	switch eventType {
@@ -223,16 +231,30 @@ func (h *AnthropicHandler) extractAnthropicStreamStats(event map[string]interfac
 		}
 	case "content_block_delta":
 		if delta, ok := event["delta"].(map[string]interface{}); ok {
-			if deltaType, ok := delta["type"].(string); ok && deltaType == "text_delta" {
-				if text, ok := delta["text"].(string); ok {
-					fullContent.WriteString(text)
+			if deltaType, ok := delta["type"].(string); ok {
+				switch deltaType {
+				case "text_delta":
+					if text, ok := delta["text"].(string); ok {
+						fullContent.WriteString(text)
+					}
+				case "thinking_delta":
+					if thinking, ok := delta["thinking"].(string); ok {
+						thinkingContent.WriteString(thinking)
+					}
 				}
 			}
 		}
 	case "message_delta":
 		if usage, ok := event["usage"].(map[string]interface{}); ok {
+			if it, ok := usage["input_tokens"].(float64); ok {
+				if int(it) > 0 {
+					*inputTokens = int(it)
+				}
+			}
 			if ot, ok := usage["output_tokens"].(float64); ok {
-				*outputTokens = int(ot)
+				if int(ot) > 0 {
+					*outputTokens = int(ot)
+				}
 			}
 		}
 	}
@@ -307,12 +329,28 @@ func (h *AnthropicHandler) handleNonStreamMessages(c *gin.Context, anthropicReq 
 
 	anthropicResp := h.convertOpenAIToAnthropic(respBody, provider.Model)
 
+	// 从 OpenAI 响应中提取 reasoning_content
+	var thinkingContent string
+	var rawResp map[string]interface{}
+	if json.Unmarshal(respBody, &rawResp) == nil {
+		if choices, ok := rawResp["choices"].([]interface{}); ok && len(choices) > 0 {
+			if choice, ok := choices[0].(map[string]interface{}); ok {
+				if msg, ok := choice["message"].(map[string]interface{}); ok {
+					if reasoning, ok := msg["reasoning_content"].(string); ok && reasoning != "" {
+						thinkingContent = reasoning
+					}
+				}
+			}
+		}
+	}
+
 	reqLog := &model.RequestLog{
 		ProviderID:      provider.ID,
 		Model:           provider.Model,
 		RequestBody:     string(openAIBody),
 		ResponseBody:    string(respBody),
 		ResponseContent: extractTextFromAnthropicContent(anthropicResp.Content),
+		ThinkingContent: thinkingContent,
 		InputTokens:     anthropicResp.Usage.InputTokens,
 		OutputTokens:    anthropicResp.Usage.OutputTokens,
 		TotalTokens:     anthropicResp.Usage.InputTokens + anthropicResp.Usage.OutputTokens,
@@ -338,6 +376,7 @@ func (h *AnthropicHandler) handleStreamMessages(c *gin.Context, anthropicReq *mo
 	// 流式状态
 	msgID := fmt.Sprintf("msg_%d", time.Now().UnixNano())
 	var fullContent strings.Builder
+	var thinkingContent strings.Builder
 	contentBlockIndex := 0
 	messageStarted := false
 	contentBlockStarted := false
@@ -371,6 +410,11 @@ func (h *AnthropicHandler) handleStreamMessages(c *gin.Context, anthropicReq *mo
 			if choices, ok := streamResp["choices"].([]interface{}); ok && len(choices) > 0 {
 				if choice, ok := choices[0].(map[string]interface{}); ok {
 					if delta, ok := choice["delta"].(map[string]interface{}); ok {
+						// 提取推理内容（reasoning_content）
+						if reasoning, ok := delta["reasoning_content"].(string); ok && reasoning != "" {
+							thinkingContent.WriteString(reasoning)
+						}
+
 						// 处理文本内容
 						if content, ok := delta["content"].(string); ok && content != "" {
 							// 首次收到内容，发送 message_start
@@ -615,6 +659,7 @@ func (h *AnthropicHandler) handleStreamMessages(c *gin.Context, anthropicReq *mo
 		RequestBody:     string(openAIBody),
 		ResponseBody:    responseBuilder.String(),
 		ResponseContent: fullContent.String(),
+		ThinkingContent: thinkingContent.String(),
 		InputTokens:     tokens.InputTokens,
 		OutputTokens:    tokens.OutputTokens,
 		TotalTokens:     tokens.TotalTokens,
@@ -973,6 +1018,17 @@ func extractTextFromAnthropicContent(blocks []model.AnthropicContentBlock) strin
 		}
 	}
 	return strings.Join(texts, "\n")
+}
+
+// extractThinkingFromAnthropicContent 从 AnthropicContentBlock 数组提取 thinking 内容
+func extractThinkingFromAnthropicContent(blocks []model.AnthropicContentBlock) string {
+	var thoughts []string
+	for _, block := range blocks {
+		if block.Type == "thinking" && block.Text != "" {
+			thoughts = append(thoughts, block.Text)
+		}
+	}
+	return strings.Join(thoughts, "\n")
 }
 
 // sseScanner 用于逐行读取 SSE 流（基于 bufio.Scanner 实现真正的流式读取）
