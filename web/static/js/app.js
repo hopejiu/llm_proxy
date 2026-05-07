@@ -89,6 +89,8 @@ function closeModal() {
     modal.classList.remove('active');
     document.getElementById('providerForm').reset();
     document.getElementById('providerId').value = '';
+    document.getElementById('suffixSection').style.display = 'block';
+    document.getElementById('urlPreview').textContent = '';
 }
 
 // 编辑 Provider
@@ -99,6 +101,9 @@ function editProvider(id) {
     document.getElementById('providerId').value = provider.id;
     document.getElementById('name').value = provider.name;
     document.getElementById('baseURL').value = provider.base_url;
+    document.getElementById('autoSuffix').checked = provider.auto_suffix || false;
+    document.getElementById('urlSuffix').value = provider.url_suffix || '';
+    onAutoSuffixChange();
     document.getElementById('apiKey').value = provider.api_key;
     document.getElementById('apiType').value = provider.api_type || 'openai';
     document.getElementById('models').value = provider.model;
@@ -117,6 +122,8 @@ async function duplicateProvider(id) {
     const data = {
         name: provider.name + ' (副本)',
         base_url: provider.base_url,
+        auto_suffix: provider.auto_suffix || false,
+        url_suffix: provider.url_suffix || '',
         api_key: provider.api_key,
         api_type: provider.api_type || 'openai',
         model: provider.model,
@@ -164,6 +171,8 @@ async function saveProvider(event) {
     const data = {
         name: document.getElementById('name').value,
         base_url: document.getElementById('baseURL').value,
+        auto_suffix: document.getElementById('autoSuffix').checked,
+        url_suffix: document.getElementById('urlSuffix').value,
         api_key: document.getElementById('apiKey').value,
         api_type: document.getElementById('apiType').value,
         model: document.getElementById('models').value,
@@ -317,17 +326,44 @@ async function setupCodeBuddy() {
     }
 }
 
-// API 类型切换时更新占位符提示
+// API 类型切换时更新占位符和后缀
 function onApiTypeChange() {
     const apiType = document.getElementById('apiType').value;
     const baseURLInput = document.getElementById('baseURL');
+    const suffixInput = document.getElementById('urlSuffix');
     const modelsInput = document.getElementById('models');
 
     if (apiType === 'anthropic') {
-        baseURLInput.placeholder = 'https://api.anthropic.com/v1/messages';
+        baseURLInput.placeholder = 'https://api.anthropic.com';
+        suffixInput.value = '/v1/messages';
         modelsInput.placeholder = 'claude-sonnet-4-20250514';
     } else {
-        baseURLInput.placeholder = 'https://api.example.com/v1/chat/completions';
+        baseURLInput.placeholder = 'https://api.example.com';
+        suffixInput.value = '/v1/chat/completions';
         modelsInput.placeholder = 'deepseek-chat';
+    }
+    updateUrlPreview();
+}
+
+// 自动拼接后缀开关切换
+function onAutoSuffixChange() {
+    const autoSuffix = document.getElementById('autoSuffix').checked;
+    const suffixSection = document.getElementById('suffixSection');
+    suffixSection.style.display = autoSuffix ? 'block' : 'none';
+    updateUrlPreview();
+}
+
+// 更新 URL 拼接预览
+function updateUrlPreview() {
+    const baseURL = document.getElementById('baseURL').value;
+    const autoSuffix = document.getElementById('autoSuffix').checked;
+    const suffix = document.getElementById('urlSuffix').value;
+    const preview = document.getElementById('urlPreview');
+
+    if (autoSuffix && baseURL && suffix) {
+        const fullURL = baseURL.replace(/\/+$/, '') + (suffix.startsWith('/') ? suffix : '/' + suffix);
+        preview.textContent = '完整URL: ' + fullURL;
+    } else {
+        preview.textContent = '';
     }
 }

@@ -81,7 +81,7 @@ func (h *OllamaHandler) handleNonStreamChat(c *gin.Context, ollamaReq *model.Oll
 	ctx, cancel := context.WithTimeout(c.Request.Context(), DefaultHTTPTimeout)
 	defer cancel()
 
-	respBody, err := h.SendRequest(ctx, provider.BaseURL, openAIBody, provider.APIKey)
+	respBody, err := h.SendRequest(ctx, provider.GetRequestURL(), openAIBody, provider.APIKey)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, model.OllamaChatResponse{
 			Model:      provider.Model,

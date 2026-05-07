@@ -273,7 +273,7 @@ func (h *BaseHandler) ExecuteStreamWithRetry(
 
 		// 发送HTTP请求
 		httpStartTime := time.Now()
-		httpResp, err := h.SendStreamRequest(ctx, provider.BaseURL, body, provider.APIKey)
+		httpResp, err := h.SendStreamRequest(ctx, provider.GetRequestURL(), body, provider.APIKey)
 		httpDuration := time.Since(httpStartTime)
 		
 		if err != nil {

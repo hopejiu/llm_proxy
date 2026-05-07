@@ -9,6 +9,8 @@ import (
 type ProviderConfig struct {
 	ID          uint      `json:"id" gorm:"primaryKey"`
 	Name        string    `json:"name" gorm:"size:100;not null"`
+	AutoSuffix  bool      `json:"auto_suffix" gorm:"default:false"`
+	UrlSuffix   string    `json:"url_suffix" gorm:"size:200;default:''"`
 	BaseURL     string    `json:"base_url" gorm:"size:500;not null"`
 	APIKey      string    `json:"api_key" gorm:"size:500;not null"`
 	Model       string    `json:"model" gorm:"size:100"`                      // 模型名称
@@ -44,6 +46,19 @@ func (p *ProviderConfig) GetModelNames() []string {
 	}
 	names = append(names, p.Model)
 	return names
+}
+
+// GetRequestURL 根据 AutoSuffix 设置返回实际请求 URL
+func (p *ProviderConfig) GetRequestURL() string {
+	if !p.AutoSuffix {
+		return p.BaseURL
+	}
+	baseURL := strings.TrimRight(p.BaseURL, "/")
+	suffix := p.UrlSuffix
+	if suffix != "" && !strings.HasPrefix(suffix, "/") {
+		suffix = "/" + suffix
+	}
+	return baseURL + suffix
 }
 
 // RequestLog 请求日志记录

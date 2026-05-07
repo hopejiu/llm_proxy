@@ -126,7 +126,7 @@ func (h *ProxyHandler) handleNormalRequest(c *gin.Context, body []byte, modelNam
 	reqLog := h.CreateRequestLog(provider, string(body))
 
 	// 发送非流式请求
-	respBody, err := h.SendRequest(c.Request.Context(), provider.BaseURL, body, provider.APIKey)
+	respBody, err := h.SendRequest(c.Request.Context(), provider.GetRequestURL(), body, provider.APIKey)
 	if err != nil {
 		slog.Error("发送HTTP请求失败", "handler", "ProxyHandler", "error", err)
 		h.logRequest(c, body, startTime, "FAILED", err.Error())

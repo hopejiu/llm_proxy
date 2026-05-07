@@ -86,7 +86,7 @@ func (h *AnthropicHandler) handleDirectNonStreamMessages(c *gin.Context, body []
 	ctx, cancel := context.WithTimeout(c.Request.Context(), DefaultHTTPTimeout)
 	defer cancel()
 
-	respBody, err := h.SendAnthropicRequest(ctx, provider.BaseURL, body, provider.APIKey)
+	respBody, err := h.SendAnthropicRequest(ctx, provider.GetRequestURL(), body, provider.APIKey)
 	if err != nil {
 		slog.Error("Anthropic直接请求失败", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -144,7 +144,7 @@ func (h *AnthropicHandler) handleDirectStreamMessages(c *gin.Context, body []byt
 	ctx, cancel := context.WithTimeout(c.Request.Context(), DefaultHTTPTimeout)
 	defer cancel()
 
-	httpResp, err := h.SendAnthropicStreamRequest(ctx, provider.BaseURL, body, provider.APIKey)
+	httpResp, err := h.SendAnthropicStreamRequest(ctx, provider.GetRequestURL(), body, provider.APIKey)
 	if err != nil {
 		slog.Error("Anthropic流式请求失败", "error", err)
 		h.sendAnthropicSSEError(c, err.Error())
@@ -318,7 +318,7 @@ func (h *AnthropicHandler) handleNonStreamMessages(c *gin.Context, anthropicReq 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), DefaultHTTPTimeout)
 	defer cancel()
 
-	respBody, err := h.SendRequest(ctx, provider.BaseURL, openAIBody, provider.APIKey)
+	respBody, err := h.SendRequest(ctx, provider.GetRequestURL(), openAIBody, provider.APIKey)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"type":  "error",

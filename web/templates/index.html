@@ -109,7 +109,16 @@
                     </div>
                     <div>
                         <label class="form-label">Base URL</label>
-                        <input type="url" id="baseURL" class="form-input" placeholder="https://api.example.com/v1/chat/completions" required>
+                        <input type="url" id="baseURL" class="form-input" placeholder="https://api.example.com" oninput="updateUrlPreview()" required>
+                        <div class="flex items-center space-x-2 mt-2">
+                            <input type="checkbox" id="autoSuffix" checked onchange="onAutoSuffixChange()" class="w-4 h-4 text-purple-600 rounded border-gray-300 focus:ring-purple-500">
+                            <label for="autoSuffix" class="text-sm text-gray-600">自动拼接后缀</label>
+                        </div>
+                        <div id="suffixSection" class="mt-2">
+                            <label class="text-sm text-gray-500">URL 后缀</label>
+                            <input type="text" id="urlSuffix" class="form-input text-sm mt-1" value="/v1/chat/completions" oninput="updateUrlPreview()">
+                        </div>
+                        <p id="urlPreview" class="text-xs text-purple-500 mt-2"></p>
                     </div>
                     <div>
                         <label class="form-label">API Key</label>
