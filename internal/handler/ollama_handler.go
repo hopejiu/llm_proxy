@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"llm-proxy/internal/model"
 	"llm-proxy/internal/repository"
 	"llm-proxy/internal/service"
@@ -30,7 +29,7 @@ func NewOllamaHandler(proxyService *service.ProxyService, requestLogRepo *reposi
 func (h *OllamaHandler) Chat(c *gin.Context) {
 	startTime := time.Now()
 
-	body, err := io.ReadAll(c.Request.Body)
+	body, err := h.ReadBody(c)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, model.OllamaChatResponse{
 			Model:      "",
@@ -63,7 +62,7 @@ func (h *OllamaHandler) Chat(c *gin.Context) {
 
 // handleNonStreamChat 处理非流式聊天请求
 func (h *OllamaHandler) handleNonStreamChat(c *gin.Context, ollamaReq *model.OllamaChatRequest, startTime time.Time) {
-	provider, err := h.GetProvider()
+	provider, err := h.GetProviderByModel(ollamaReq.Model)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, model.OllamaChatResponse{
 			Model:      ollamaReq.Model,
@@ -121,7 +120,7 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, ollamaReq *model.Ollama
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 
-	provider, err := h.GetProvider()
+	provider, err := h.GetProviderByModel(ollamaReq.Model)
 	if err != nil {
 		h.sendOllamaStreamError(c, err.Error())
 		return
@@ -200,7 +199,7 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, ollamaReq *model.Ollama
 
 // Tags 处理 /api/tags 请求
 func (h *OllamaHandler) Tags(c *gin.Context) {
-	providers, err := h.GetProviders()
+	providers, err := h.GetAllProviders()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -208,17 +207,19 @@ func (h *OllamaHandler) Tags(c *gin.Context) {
 
 	var models []model.OllamaModelInfo
 	for _, provider := range providers {
-		models = append(models, model.OllamaModelInfo{
-			Name:       provider.Model,
-			Model:      provider.Model,
-			ModifiedAt: provider.UpdatedAt.Format(time.RFC3339),
-			Size:       0,
-			Digest:     "",
-			Details: model.OllamaModelDetails{
-				Format: "api",
-				Family: "llm-proxy",
-			},
-		})
+		for _, name := range provider.GetModelNames() {
+			models = append(models, model.OllamaModelInfo{
+				Name:       name,
+				Model:      name,
+				ModifiedAt: provider.UpdatedAt.Format(time.RFC3339),
+				Size:       0,
+				Digest:     "",
+				Details: model.OllamaModelDetails{
+					Format: "api",
+					Family: "llm-proxy",
+				},
+			})
+		}
 	}
 
 	c.JSON(http.StatusOK, model.OllamaTagsResponse{Models: models})

@@ -38,13 +38,6 @@ func (r *ProviderRepository) GetAll() ([]model.ProviderConfig, error) {
 	return providers, err
 }
 
-// GetActive 获取所有启用的Provider
-func (r *ProviderRepository) GetActive() ([]model.ProviderConfig, error) {
-	var providers []model.ProviderConfig
-	err := r.db.Where("is_active = ?", true).Order("id desc").Find(&providers).Error
-	return providers, err
-}
-
 // Update 更新Provider
 func (r *ProviderRepository) Update(provider *model.ProviderConfig) error {
 	return r.db.Save(provider).Error
@@ -58,20 +51,6 @@ func (r *ProviderRepository) Delete(id uint) error {
 			return err
 		}
 		return tx.Delete(&model.ProviderConfig{}, id).Error
-	})
-}
-
-// ToggleActive 切换启用状态（激活一个时禁用其他所有）
-func (r *ProviderRepository) ToggleActive(id uint, isActive bool) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
-		// 如果要激活，先禁用所有其他 provider
-		if isActive {
-			if err := tx.Model(&model.ProviderConfig{}).Where("id != ?", id).Update("is_active", false).Error; err != nil {
-				return err
-			}
-		}
-		// 再激活/禁用当前 provider
-		return tx.Model(&model.ProviderConfig{}).Where("id = ?", id).Update("is_active", isActive).Error
 	})
 }
 

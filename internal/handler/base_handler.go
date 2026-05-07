@@ -12,6 +12,7 @@ import (
 	"llm-proxy/internal/service"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -44,14 +45,14 @@ func NewBaseHandler(proxyService *service.ProxyService, requestLogRepo *reposito
 	}
 }
 
-// GetProvider 获取第一个活跃的 Provider
-func (h *BaseHandler) GetProvider() (*model.ProviderConfig, error) {
-	return h.proxyService.GetFirstActiveProvider()
+// GetProviderByModel 根据模型名匹配 Provider
+func (h *BaseHandler) GetProviderByModel(modelName string) (*model.ProviderConfig, error) {
+	return h.proxyService.GetProviderByModel(modelName)
 }
 
-// GetProviders 获取所有活跃的 Providers
-func (h *BaseHandler) GetProviders() ([]model.ProviderConfig, error) {
-	return h.proxyService.GetActiveProviders()
+// GetAllProviders 获取所有 Provider
+func (h *BaseHandler) GetAllProviders() ([]model.ProviderConfig, error) {
+	return h.proxyService.GetAllProviders()
 }
 
 // PrepareRequestBody 准备请求体（委托给 ProxyService）
@@ -460,4 +461,134 @@ func (h *BaseHandler) detectStreamError(data map[string]interface{}) *StreamErro
 	}
 
 	return nil
+}
+
+// parseStreamResponse 返回格式化的可读 JSON
+func parseStreamResponse(sseData string) string {
+	var contentBuilder strings.Builder
+	var reasoningBuilder strings.Builder
+	var lastChunk map[string]interface{}
+
+	// tool_calls 拼接：按 index 存储每个 tool_call 的片段
+	toolCalls := make(map[int]map[string]interface{})
+
+	lines := strings.Split(sseData, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+
+		data := strings.TrimPrefix(line, "data: ")
+		if data == "[DONE]" {
+			continue
+		}
+
+		var chunk map[string]interface{}
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			continue
+		}
+
+		lastChunk = chunk
+
+		// 提取 choices[0].delta.content
+		if choices, ok := chunk["choices"].([]interface{}); ok && len(choices) > 0 {
+			if choice, ok := choices[0].(map[string]interface{}); ok {
+				if delta, ok := choice["delta"].(map[string]interface{}); ok {
+					// 提取普通内容
+					if content, ok := delta["content"].(string); ok {
+						contentBuilder.WriteString(content)
+					}
+					// 提取推理内容
+					if reasoning, ok := delta["reasoning_content"].(string); ok && reasoning != "" {
+						reasoningBuilder.WriteString(reasoning)
+					}
+					// 提取 tool_calls
+					if toolCallsDelta, ok := delta["tool_calls"].([]interface{}); ok {
+						for _, tc := range toolCallsDelta {
+							if tcMap, ok := tc.(map[string]interface{}); ok {
+								index := 0
+								if idx, ok := tcMap["index"].(float64); ok {
+									index = int(idx)
+								}
+								// 初始化该 index 的 tool_call
+								if toolCalls[index] == nil {
+									toolCalls[index] = map[string]interface{}{
+										"id":   "",
+										"type": "function",
+										"function": map[string]string{
+											"name":      "",
+											"arguments": "",
+										},
+									}
+								}
+								// 拼接 id
+								if id, ok := tcMap["id"].(string); ok && id != "" {
+									toolCalls[index]["id"] = id
+								}
+								// 拼接 type
+								if t, ok := tcMap["type"].(string); ok && t != "" {
+									toolCalls[index]["type"] = t
+								}
+								// 拼接 function
+								if fn, ok := tcMap["function"].(map[string]interface{}); ok {
+									fnMap := toolCalls[index]["function"].(map[string]string)
+									if name, ok := fn["name"].(string); ok && name != "" {
+										fnMap["name"] = name
+									}
+									if args, ok := fn["arguments"].(string); ok {
+										fnMap["arguments"] += args
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 构建可读的 JSON 结果
+	result := map[string]interface{}{
+		"content": contentBuilder.String(),
+	}
+
+	// 如果有推理内容，也加入
+	if reasoningBuilder.Len() > 0 {
+		result["reasoning_content"] = reasoningBuilder.String()
+	}
+
+	// 如果有 tool_calls，按 index 顺序加入
+	if len(toolCalls) > 0 {
+		indices := make([]int, 0, len(toolCalls))
+		for idx := range toolCalls {
+			indices = append(indices, idx)
+		}
+		// 排序
+		sort.Ints(indices)
+		// 按顺序构建 tool_calls 数组
+		tcArray := make([]map[string]interface{}, len(indices))
+		for i, idx := range indices {
+			tcArray[i] = toolCalls[idx]
+		}
+		result["tool_calls"] = tcArray
+	}
+
+	// 从最后一个 chunk 提取 usage 信息
+	if lastChunk != nil {
+		if usage, ok := lastChunk["usage"].(map[string]interface{}); ok {
+			result["usage"] = usage
+		}
+		// 提取 model
+		if model, ok := lastChunk["model"].(string); ok {
+			result["model"] = model
+		}
+	}
+
+	// 格式化输出
+	jsonBytes, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return contentBuilder.String()
+	}
+	return string(jsonBytes)
 }

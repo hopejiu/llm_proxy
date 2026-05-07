@@ -555,14 +555,6 @@ function pad(n) {
     return n < 10 ? '0' + n : n;
 }
 
-// 工具函数：转义 HTML
-function escapeHtml(text) {
-    if (!text) return '-';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
 // 窗口大小改变时重新调整图表
 let resizeTimeout;
 window.addEventListener('resize', () => {
@@ -620,22 +612,6 @@ function copyToClipboard(elementId) {
         console.error('Failed to copy:', err);
         showToast('复制失败', 'error');
     });
-}
-
-// Toast提示
-function showToast(message, type = 'success') {
-    const toast = document.createElement('div');
-    toast.className = `fixed top-4 right-4 px-6 py-3 rounded-lg shadow-lg text-white font-medium z-50 animate-fade-in ${
-        type === 'success' ? 'bg-green-500' : 'bg-red-500'
-    }`;
-    toast.textContent = message;
-    document.body.appendChild(toast);
-    
-    setTimeout(() => {
-        toast.style.opacity = '0';
-        toast.style.transform = 'translateY(-10px)';
-        setTimeout(() => toast.remove(), 300);
-    }, 3000);
 }
 
 // 周报模式切换

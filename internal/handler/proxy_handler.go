@@ -10,153 +10,16 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
-// 返回格式化的可读 JSON
-func parseStreamResponse(sseData string) string {
-	var contentBuilder strings.Builder
-	var reasoningBuilder strings.Builder
-	var lastChunk map[string]interface{}
-
-	// tool_calls 拼接：按 index 存储每个 tool_call 的片段
-	// toolCalls[index] = {id, type, function: {name, arguments}}
-	toolCalls := make(map[int]map[string]interface{})
-
-	lines := strings.Split(sseData, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-
-		data := strings.TrimPrefix(line, "data: ")
-		if data == "[DONE]" {
-			continue
-		}
-
-		var chunk map[string]interface{}
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			continue
-		}
-
-		lastChunk = chunk
-
-		// 提取 choices[0].delta.content
-		if choices, ok := chunk["choices"].([]interface{}); ok && len(choices) > 0 {
-			if choice, ok := choices[0].(map[string]interface{}); ok {
-				if delta, ok := choice["delta"].(map[string]interface{}); ok {
-					// 提取普通内容
-					if content, ok := delta["content"].(string); ok {
-						contentBuilder.WriteString(content)
-					}
-					// 提取推理内容
-					if reasoning, ok := delta["reasoning_content"].(string); ok && reasoning != "" {
-						reasoningBuilder.WriteString(reasoning)
-					}
-					// 提取 tool_calls
-					if toolCallsDelta, ok := delta["tool_calls"].([]interface{}); ok {
-						for _, tc := range toolCallsDelta {
-							if tcMap, ok := tc.(map[string]interface{}); ok {
-								index := 0
-								if idx, ok := tcMap["index"].(float64); ok {
-									index = int(idx)
-								}
-								// 初始化该 index 的 tool_call
-								if toolCalls[index] == nil {
-									toolCalls[index] = map[string]interface{}{
-										"id":   "",
-										"type": "function",
-										"function": map[string]string{
-											"name":      "",
-											"arguments": "",
-										},
-									}
-								}
-								// 拼接 id
-								if id, ok := tcMap["id"].(string); ok && id != "" {
-									toolCalls[index]["id"] = id
-								}
-								// 拼接 type
-								if t, ok := tcMap["type"].(string); ok && t != "" {
-									toolCalls[index]["type"] = t
-								}
-								// 拼接 function
-								if fn, ok := tcMap["function"].(map[string]interface{}); ok {
-									fnMap := toolCalls[index]["function"].(map[string]string)
-									if name, ok := fn["name"].(string); ok && name != "" {
-										fnMap["name"] = name
-									}
-									if args, ok := fn["arguments"].(string); ok {
-										fnMap["arguments"] += args
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// 构建可读的 JSON 结果
-	result := map[string]interface{}{
-		"content": contentBuilder.String(),
-	}
-
-	// 如果有推理内容，也加入
-	if reasoningBuilder.Len() > 0 {
-		result["reasoning_content"] = reasoningBuilder.String()
-	}
-
-	// 如果有 tool_calls，按 index 顺序加入
-	if len(toolCalls) > 0 {
-		// 获取所有 index 并排序
-		indices := make([]int, 0, len(toolCalls))
-		for idx := range toolCalls {
-			indices = append(indices, idx)
-		}
-		// 简单排序
-		for i := 0; i < len(indices)-1; i++ {
-			for j := i + 1; j < len(indices); j++ {
-				if indices[i] > indices[j] {
-					indices[i], indices[j] = indices[j], indices[i]
-				}
-			}
-		}
-		// 按顺序构建 tool_calls 数组
-		tcArray := make([]map[string]interface{}, len(indices))
-		for i, idx := range indices {
-			tcArray[i] = toolCalls[idx]
-		}
-		result["tool_calls"] = tcArray
-	}
-
-	// 从最后一个 chunk 提取 usage 信息
-	if lastChunk != nil {
-		if usage, ok := lastChunk["usage"].(map[string]interface{}); ok {
-			result["usage"] = usage
-		}
-		// 提取 model
-		if model, ok := lastChunk["model"].(string); ok {
-			result["model"] = model
-		}
-	}
-
-	// 格式化输出
-	jsonBytes, err := json.MarshalIndent(result, "", "  ")
-	if err != nil {
-		return contentBuilder.String()
-	}
-	return string(jsonBytes)
-}
-
 // ProxyHandler OpenAI API 处理器
 type ProxyHandler struct {
 	*BaseHandler // 组合基类
 	requestLog   *os.File
+	logMu        sync.Mutex
 }
 
 // NewProxyHandler 创建 ProxyHandler 实例
@@ -210,7 +73,11 @@ func (h *ProxyHandler) logRequest(c *gin.Context, reqBody []byte, startTime time
 		errMsg,
 		string(reqBody),
 	)
-	h.requestLog.WriteString(logEntry)
+	h.logMu.Lock()
+	if _, err := h.requestLog.WriteString(logEntry); err != nil {
+		slog.Warn("写入请求日志失败", "error", err)
+	}
+	h.logMu.Unlock()
 }
 
 // ChatCompletions 中转OpenAI请求
@@ -225,20 +92,24 @@ func (h *ProxyHandler) ChatCompletions(c *gin.Context) {
 		return
 	}
 
-	// 解析请求检查是否流式
+	// 解析请求获取 model 和 stream 标记
 	var req model.OpenAIRequest
-	json.Unmarshal(body, &req)
+	if err := json.Unmarshal(body, &req); err != nil {
+		h.logRequest(c, body, startTime, "ERROR", "invalid request body")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
 
 	if req.Stream {
-		h.handleStreamRequest(c, body, startTime)
+		h.handleStreamRequest(c, body, req.Model, startTime)
 	} else {
-		h.handleNormalRequest(c, body, startTime)
+		h.handleNormalRequest(c, body, req.Model, startTime)
 	}
 }
 
 // handleNormalRequest 处理非流式请求
-func (h *ProxyHandler) handleNormalRequest(c *gin.Context, body []byte, startTime time.Time) {
-	provider, err := h.GetProvider()
+func (h *ProxyHandler) handleNormalRequest(c *gin.Context, body []byte, modelName string, startTime time.Time) {
+	provider, err := h.GetProviderByModel(modelName)
 	if err != nil {
 		h.logRequest(c, body, startTime, "FAILED", err.Error())
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -312,12 +183,12 @@ func (h *ProxyHandler) handleNormalRequest(c *gin.Context, body []byte, startTim
 }
 
 // handleStreamRequest 处理流式请求（支持超时重试）
-func (h *ProxyHandler) handleStreamRequest(c *gin.Context, body []byte, startTime time.Time) {
+func (h *ProxyHandler) handleStreamRequest(c *gin.Context, body []byte, modelName string, startTime time.Time) {
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 
-	provider, err := h.GetProvider()
+	provider, err := h.GetProviderByModel(modelName)
 	if err != nil {
 		h.logRequest(c, body, startTime, "FAILED", err.Error())
 		c.SSEvent("error", gin.H{"error": err.Error()})
@@ -367,9 +238,9 @@ func (h *ProxyHandler) handleStreamRequest(c *gin.Context, body []byte, startTim
 func (h *ProxyHandler) Models(c *gin.Context) {
 	startTime := time.Now()
 
-	providers, err := h.GetProviders()
+	providers, err := h.GetAllProviders()
 	if err != nil {
-		slog.Error("获取活跃Provider失败", "handler", "ProxyHandler", "error", err)
+		slog.Error("获取Provider列表失败", "handler", "ProxyHandler", "error", err)
 		h.logRequest(c, []byte{}, startTime, "FAILED", err.Error())
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -377,11 +248,13 @@ func (h *ProxyHandler) Models(c *gin.Context) {
 
 	var models []gin.H
 	for _, provider := range providers {
-		models = append(models, gin.H{
-			"id":       provider.Model,
-			"object":   "model",
-			"provider": provider.Name,
-		})
+		for _, name := range provider.GetModelNames() {
+			models = append(models, gin.H{
+				"id":       name,
+				"object":   "model",
+				"provider": provider.Name,
+			})
+		}
 	}
 
 	h.logRequest(c, []byte{}, startTime, "SUCCESS", "")

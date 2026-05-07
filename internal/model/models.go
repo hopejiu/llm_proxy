@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"time"
 )
 
@@ -11,10 +12,38 @@ type ProviderConfig struct {
 	BaseURL     string    `json:"base_url" gorm:"size:500;not null"`
 	APIKey      string    `json:"api_key" gorm:"size:500;not null"`
 	Model       string    `json:"model" gorm:"size:100"`                      // 模型名称
+	Alias       string    `json:"alias" gorm:"size:200"`                      // 别名，多个用逗号分隔，用于模型名路由匹配
+	APIType     string    `json:"api_type" gorm:"size:20;default:openai"`     // API类型: openai 或 anthropic
 	ExtraParams string    `json:"extra_params" gorm:"type:text"`              // 自定义请求参数JSON
-	IsActive    bool      `json:"is_active" gorm:"default:false"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// IsAnthropic 判断是否为 Anthropic 类型的 Provider
+func (p *ProviderConfig) IsAnthropic() bool {
+	return p.APIType == "anthropic"
+}
+
+// GetDisplayName 获取用于模型列表显示的名称，优先别名
+func (p *ProviderConfig) GetDisplayName() string {
+	if p.Alias != "" {
+		return strings.TrimSpace(strings.Split(p.Alias, ",")[0])
+	}
+	return p.Model
+}
+
+// GetModelNames 获取所有可用于请求的模型名称列表（别名 + 模型名）
+func (p *ProviderConfig) GetModelNames() []string {
+	var names []string
+	if p.Alias != "" {
+		for _, a := range strings.Split(p.Alias, ",") {
+			if trimmed := strings.TrimSpace(a); trimmed != "" {
+				names = append(names, trimmed)
+			}
+		}
+	}
+	names = append(names, p.Model)
+	return names
 }
 
 // RequestLog 请求日志记录

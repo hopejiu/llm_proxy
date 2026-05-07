@@ -126,33 +126,6 @@ func (h *WebHandler) DeleteProvider(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "deleted successfully"})
 }
 
-// ToggleProvider 切换Provider状态
-func (h *WebHandler) ToggleProvider(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		slog.Error("解析Provider ID失败", "error", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
-		return
-	}
-
-	var req struct {
-		IsActive bool `json:"is_active"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		slog.Error("绑定Toggle请求JSON失败", "error", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	if err := h.providerService.ToggleProviderStatus(uint(id), req.IsActive); err != nil {
-		slog.Error("切换Provider状态失败", "id", id, "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "status updated"})
-}
-
 // GetStats 获取统计数据
 func (h *WebHandler) GetStats(c *gin.Context) {
 	stats, err := h.statsService.GetDashboardStats()

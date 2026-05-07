@@ -14,42 +14,50 @@ type AnthropicMessagesRequest struct {
 	Tools         []AnthropicTool       `json:"tools,omitempty"`
 	ToolChoice    interface{}           `json:"tool_choice,omitempty"`
 	Metadata      interface{}           `json:"metadata,omitempty"`
+	Thinking      *AnthropicThinking    `json:"thinking,omitempty"`
+}
+
+// AnthropicThinking 扩展思考配置
+type AnthropicThinking struct {
+	Type         string `json:"type"`
+	BudgetTokens int    `json:"budget_tokens,omitempty"`
 }
 
 // AnthropicMessage Anthropic 消息格式
 type AnthropicMessage struct {
-	Role    string                   `json:"role"`
-	Content interface{}              `json:"content"`
+	Role    string      `json:"role"`
+	Content interface{} `json:"content"`
 }
 
-// AnthropicContentBlock Anthropic 内容块
+// AnthropicContentBlock Anthropic 内容块（支持所有类型）
 type AnthropicContentBlock struct {
-	Type  string      `json:"type"`
-	Text  string      `json:"text,omitempty"`
-	ID    string      `json:"id,omitempty"`
-	Name  string      `json:"name,omitempty"`
-	Input interface{} `json:"input,omitempty"`
-	ToolUseID string  `json:"tool_use_id,omitempty"`
-	Content   string  `json:"content,omitempty"` // 用于 tool_result 类型
+	Type      string      `json:"type"`
+	Text      string      `json:"text,omitempty"`
+	ID        string      `json:"id,omitempty"`
+	Name      string      `json:"name,omitempty"`
+	Input     interface{} `json:"input,omitempty"`
+	ToolUseID string      `json:"tool_use_id,omitempty"`
+	Content   interface{} `json:"content,omitempty"` // tool_result 的 content，可以是 string 或 []AnthropicContentBlock
+	IsError   *bool       `json:"is_error,omitempty"` // tool_result 的错误标记
 }
 
 // AnthropicTool Anthropic 工具定义
 type AnthropicTool struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description,omitempty"`
-	InputSchema interface{}            `json:"input_schema"`
+	Name        string      `json:"name"`
+	Description string      `json:"description,omitempty"`
+	InputSchema interface{} `json:"input_schema"`
 }
 
 // AnthropicMessagesResponse Anthropic /v1/messages 非流式响应
 type AnthropicMessagesResponse struct {
-	ID           string                   `json:"id"`
-	Type         string                   `json:"type"`
-	Role         string                   `json:"role"`
-	Content      []AnthropicContentBlock  `json:"content"`
-	Model        string                   `json:"model"`
-	StopReason   string                   `json:"stop_reason"`
-	StopSequence *string                  `json:"stop_sequence,omitempty"`
-	Usage        AnthropicUsage           `json:"usage"`
+	ID           string                  `json:"id"`
+	Type         string                  `json:"type"`
+	Role         string                  `json:"role"`
+	Content      []AnthropicContentBlock `json:"content"`
+	Model        string                  `json:"model"`
+	StopReason   string                  `json:"stop_reason"`
+	StopSequence *string                 `json:"stop_sequence,omitempty"`
+	Usage        AnthropicUsage          `json:"usage"`
 }
 
 // AnthropicUsage Anthropic 使用量
@@ -58,33 +66,6 @@ type AnthropicUsage struct {
 	OutputTokens             int `json:"output_tokens"`
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
-}
-
-// AnthropicStreamEvent Anthropic 流式事件
-type AnthropicStreamEvent struct {
-	Type         string                   `json:"type"`
-	Message      *AnthropicMessagesResponse `json:"message,omitempty"`
-	Index        int                      `json:"index,omitempty"`
-	ContentBlock *AnthropicContentBlock   `json:"content_block,omitempty"`
-	Delta        interface{}              `json:"delta,omitempty"`
-	Usage        *AnthropicDeltaUsage     `json:"usage,omitempty"`
-}
-
-// AnthropicDeltaUsage message_delta 中的 usage
-type AnthropicDeltaUsage struct {
-	OutputTokens int `json:"output_tokens"`
-}
-
-// AnthropicTextDelta content_block_delta 中的文本增量
-type AnthropicTextDelta struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
-}
-
-// AnthropicStopDelta message_delta 中的 stop_reason
-type AnthropicStopDelta struct {
-	Type        string `json:"type"`
-	StopReason  string `json:"stop_reason"`
 }
 
 // AnthropicModelsResponse Anthropic /v1/models 响应
@@ -97,8 +78,8 @@ type AnthropicModelsResponse struct {
 
 // AnthropicModelInfo Anthropic 模型信息
 type AnthropicModelInfo struct {
-	ID         string `json:"id"`
-	Type       string `json:"type"`
+	ID          string `json:"id"`
+	Type        string `json:"type"`
 	DisplayName string `json:"display_name,omitempty"`
-	CreatedAt  string `json:"created_at,omitempty"`
+	CreatedAt   string `json:"created_at,omitempty"`
 }

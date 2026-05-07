@@ -100,6 +100,14 @@
                         <input type="text" id="name" class="form-input" placeholder="例如：DeepSeek" required>
                     </div>
                     <div>
+                        <label class="form-label">API 类型</label>
+                        <select id="apiType" class="form-input" onchange="onApiTypeChange()">
+                            <option value="openai">OpenAI 兼容</option>
+                            <option value="anthropic">Anthropic</option>
+                        </select>
+                        <p class="text-xs text-gray-400 mt-1">Anthropic 类型将直接透传请求，支持 Claude Code 等工具</p>
+                    </div>
+                    <div>
                         <label class="form-label">Base URL</label>
                         <input type="url" id="baseURL" class="form-input" placeholder="https://api.example.com/v1/chat/completions" required>
                     </div>
@@ -110,6 +118,11 @@
                     <div>
                         <label class="form-label">模型</label>
                         <input type="text" id="models" class="form-input" placeholder="deepseek-chat" required>
+                    </div>
+                    <div>
+                        <label class="form-label">别名（可选）</label>
+                        <input type="text" id="alias" class="form-input" placeholder="多个别名用逗号分隔，如: ds,deepseek">
+                        <p class="text-xs text-gray-400 mt-1">请求中的 model name 会优先匹配别名，其次匹配模型名</p>
                     </div>
                     <div>
                         <label class="form-label">自定义参数 (JSON格式，可选)</label>
@@ -145,6 +158,7 @@
         </div>
     </div>
 
+    <script src="/static/js/common.js"></script>
     <script src="/static/js/app.js"></script>
 </body>
 </html>

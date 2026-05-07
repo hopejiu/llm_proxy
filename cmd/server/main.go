@@ -96,7 +96,7 @@ func main() {
 
 	// 初始化 Repository
 	providerRepo := repository.NewProviderRepository(db)
-	requestLogRepo := repository.NewRequestLogRepository(db)
+	requestLogRepo := repository.NewRequestLogRepository(db, cfg.DBType)
 
 	// 启动时清理旧数据
 	fmt.Println("→ 正在清理旧数据...")
@@ -104,8 +104,8 @@ func main() {
 	fmt.Println("✓ 数据清理完成")
 
 	// 初始化 Service
-	providerService := service.NewProviderService(providerRepo)
 	proxyService := service.NewProxyService(providerRepo, requestLogRepo)
+	providerService := service.NewProviderService(providerRepo, proxyService)
 	statsService := service.NewStatsService(requestLogRepo)
 
 	// 初始化 Handler
@@ -226,7 +226,6 @@ func startWebServer(port string, h *handler.WebHandler) *http.Server {
 		api.POST("/providers", h.CreateProvider)
 		api.PUT("/providers/:id", h.UpdateProvider)
 		api.DELETE("/providers/:id", h.DeleteProvider)
-		api.POST("/providers/:id/toggle", h.ToggleProvider)
 		api.GET("/providers/export", h.ExportProviders)
 		api.POST("/providers/import", h.ImportProviders)
 

@@ -36,16 +36,6 @@ function renderProviders() {
             <div class="flex justify-between items-start mb-4">
                 <div class="flex items-center space-x-3">
                     <h3 class="text-lg font-bold text-gray-800">${escapeHtml(p.name)}</h3>
-                    ${p.is_active ? 
-                        '<span class="tag tag-success">启用</span>' : 
-                        '<span class="tag tag-error">禁用</span>'}
-                </div>
-                <div class="flex items-center space-x-2">
-                    <label class="toggle">
-                        <input type="checkbox" ${p.is_active ? 'checked' : ''} 
-                               onchange="toggleProvider(${p.id}, this.checked)">
-                        <span class="toggle-slider"></span>
-                    </label>
                 </div>
             </div>
             
@@ -53,6 +43,8 @@ function renderProviders() {
                 <p class="text-sm text-gray-500 truncate">${escapeHtml(p.base_url)}</p>
                 <div class="flex flex-wrap gap-2">
                     <span class="tag tag-primary">${escapeHtml(p.model)}</span>
+                    ${p.alias ? p.alias.split(',').map(a => `<span class="tag" style="background:#fef3c7;color:#92400e">${escapeHtml(a.trim())}</span>`).join('') : ''}
+                    ${p.api_type === 'anthropic' ? '<span class="tag" style="background:#f0abfc;color:#701a75">Anthropic</span>' : ''}
                 </div>
             </div>
             
@@ -108,8 +100,11 @@ function editProvider(id) {
     document.getElementById('name').value = provider.name;
     document.getElementById('baseURL').value = provider.base_url;
     document.getElementById('apiKey').value = provider.api_key;
+    document.getElementById('apiType').value = provider.api_type || 'openai';
     document.getElementById('models').value = provider.model;
+    document.getElementById('alias').value = provider.alias || '';
     document.getElementById('extraParams').value = provider.extra_params || '';
+    onApiTypeChange();
     
     openModal(true);
 }
@@ -123,9 +118,10 @@ async function duplicateProvider(id) {
         name: provider.name + ' (副本)',
         base_url: provider.base_url,
         api_key: provider.api_key,
+        api_type: provider.api_type || 'openai',
         model: provider.model,
+        alias: provider.alias || '',
         extra_params: provider.extra_params || '',
-        is_active: false
     };
     
     try {
@@ -169,9 +165,10 @@ async function saveProvider(event) {
         name: document.getElementById('name').value,
         base_url: document.getElementById('baseURL').value,
         api_key: document.getElementById('apiKey').value,
+        api_type: document.getElementById('apiType').value,
         model: document.getElementById('models').value,
+        alias: document.getElementById('alias').value.trim(),
         extra_params: extraParamsStr,
-        is_active: false
     };
     
     try {
@@ -195,35 +192,6 @@ async function saveProvider(event) {
     } catch (error) {
         console.error('Failed to save provider:', error);
         showToast('保存失败', 'error');
-    }
-}
-
-// 切换 Provider 状态（只能激活一个，点击已激活的不会禁用）
-async function toggleProvider(id, isActive) {
-    // 如果要禁用当前已激活的，阻止操作
-    if (!isActive) {
-        showToast('请点击其他模型来切换激活', 'error');
-        // 恢复 checkbox 状态
-        setTimeout(() => loadProviders(), 100);
-        return;
-    }
-    
-    try {
-        const response = await fetch(`/api/providers/${id}/toggle`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ is_active: true })
-        });
-        
-        if (response.ok) {
-            showToast('已切换激活模型', 'success');
-            loadProviders();
-        } else {
-            showToast('操作失败', 'error');
-        }
-    } catch (error) {
-        console.error('Failed to toggle provider:', error);
-        showToast('操作失败', 'error');
     }
 }
 
@@ -259,30 +227,6 @@ async function confirmDelete() {
         console.error('Failed to delete provider:', error);
         showToast('删除失败', 'error');
     }
-}
-
-// 工具函数：转义 HTML
-function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-// 工具函数：显示 Toast 提示
-function showToast(message, type = 'success') {
-    const toast = document.createElement('div');
-    toast.className = `fixed top-4 right-4 px-6 py-3 rounded-lg shadow-lg text-white font-medium z-50 animate-fade-in ${
-        type === 'success' ? 'bg-green-500' : 'bg-red-500'
-    }`;
-    toast.textContent = message;
-    document.body.appendChild(toast);
-    
-    setTimeout(() => {
-        toast.style.opacity = '0';
-        toast.style.transform = 'translateY(-10px)';
-        setTimeout(() => toast.remove(), 300);
-    }, 3000);
 }
 
 // 导出配置
@@ -370,5 +314,20 @@ async function setupCodeBuddy() {
     } catch (error) {
         console.error('Failed to setup CodeBuddy:', error);
         showToast('配置失败', 'error');
+    }
+}
+
+// API 类型切换时更新占位符提示
+function onApiTypeChange() {
+    const apiType = document.getElementById('apiType').value;
+    const baseURLInput = document.getElementById('baseURL');
+    const modelsInput = document.getElementById('models');
+
+    if (apiType === 'anthropic') {
+        baseURLInput.placeholder = 'https://api.anthropic.com/v1/messages';
+        modelsInput.placeholder = 'claude-sonnet-4-20250514';
+    } else {
+        baseURLInput.placeholder = 'https://api.example.com/v1/chat/completions';
+        modelsInput.placeholder = 'deepseek-chat';
     }
 }

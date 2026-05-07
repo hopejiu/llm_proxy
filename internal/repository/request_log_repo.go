@@ -10,11 +10,12 @@ import (
 )
 
 type RequestLogRepository struct {
-	db *gorm.DB
+	db     *gorm.DB
+	dbType string
 }
 
-func NewRequestLogRepository(db *gorm.DB) *RequestLogRepository {
-	return &RequestLogRepository{db: db}
+func NewRequestLogRepository(db *gorm.DB, dbType string) *RequestLogRepository {
+	return &RequestLogRepository{db: db, dbType: dbType}
 }
 
 // Create 创建请求日志
@@ -183,10 +184,17 @@ func (r *RequestLogRepository) GetTodayHourlyStats() ([]HourlyStats, error) {
 	startOfDay, _ := time.Parse("2006-01-02", today)
 	endOfDay := startOfDay.Add(24 * time.Hour)
 
-	var stats []HourlyStats
-	err := r.db.Raw(`
+	// 根据数据库类型选择兼容的 SQL 语法
+	var hourExpr string
+	if r.dbType == "sqlite" {
+		hourExpr = "CAST(strftime('%H', created_at) AS INTEGER)"
+	} else {
+		hourExpr = "EXTRACT(HOUR FROM created_at)"
+	}
+
+	query := fmt.Sprintf(`
 		SELECT 
-			EXTRACT(HOUR FROM created_at) as hour,
+			%s as hour,
 			COUNT(*) as request_count,
 			COALESCE(SUM(total_tokens), 0) as total_tokens,
 			COALESCE(SUM(input_tokens), 0) as input_tokens,
@@ -195,9 +203,12 @@ func (r *RequestLogRepository) GetTodayHourlyStats() ([]HourlyStats, error) {
 		FROM request_logs
 		WHERE created_at BETWEEN ? AND ?
 			AND status = 'success'
-		GROUP BY EXTRACT(HOUR FROM created_at)
+		GROUP BY %s
 		ORDER BY hour
-	`, startOfDay, endOfDay).Scan(&stats).Error
+	`, hourExpr, hourExpr)
+
+	var stats []HourlyStats
+	err := r.db.Raw(query, startOfDay, endOfDay).Scan(&stats).Error
 
 	return stats, err
 }
