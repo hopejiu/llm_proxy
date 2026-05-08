@@ -36,25 +36,68 @@ func (r *RequestLogRepository) GetByID(id uint) (*model.RequestLog, error) {
 	return &requestLog, nil
 }
 
-// GetRecent 获取最近的日志
+// GetRecent 获取最近的日志（批量预加载 Provider 信息，避免 N+1 查询）
 func (r *RequestLogRepository) GetRecent(limit int) ([]model.RequestLog, error) {
 	var logs []model.RequestLog
 	err := r.db.Order("created_at desc").Limit(limit).Find(&logs).Error
 	if err != nil {
 		return logs, err
 	}
-	// 手动填充Provider信息
-	for i := range logs {
-		r.fillProviderInfo(&logs[i])
-	}
+	r.fillProviderInfoBatch(logs)
 	return logs, nil
 }
 
-// fillProviderInfo 填充Provider信息（ProviderID=999时显示"已删除"）
+// fillProviderInfoBatch 批量填充 Provider 信息
+func (r *RequestLogRepository) fillProviderInfoBatch(logs []model.RequestLog) {
+	if len(logs) == 0 {
+		return
+	}
+
+	// 收集需要查询的 ProviderID
+	providerIDs := make(map[uint]struct{})
+	for _, log := range logs {
+		if log.ProviderID != model.DeletedProviderID {
+			providerIDs[log.ProviderID] = struct{}{}
+		}
+	}
+
+	// 批量查询所有需要的 Provider
+	providerMap := make(map[uint]model.ProviderConfig)
+	if len(providerIDs) > 0 {
+		ids := make([]uint, 0, len(providerIDs))
+		for id := range providerIDs {
+			ids = append(ids, id)
+		}
+		var providers []model.ProviderConfig
+		r.db.Where("id IN ?", ids).Find(&providers)
+		for _, p := range providers {
+			providerMap[p.ID] = p
+		}
+	}
+
+	// 填充
+	for i := range logs {
+		if logs[i].ProviderID == model.DeletedProviderID {
+			logs[i].Provider = model.ProviderConfig{
+				ID:   model.DeletedProviderID,
+				Name: "已删除",
+			}
+		} else if p, ok := providerMap[logs[i].ProviderID]; ok {
+			logs[i].Provider = p
+		} else {
+			logs[i].Provider = model.ProviderConfig{
+				ID:   logs[i].ProviderID,
+				Name: "未知",
+			}
+		}
+	}
+}
+
+// fillProviderInfo 填充Provider信息（ProviderID=DeletedProviderID时显示"已删除"）
 func (r *RequestLogRepository) fillProviderInfo(log *model.RequestLog) {
-	if log.ProviderID == 999 {
+	if log.ProviderID == model.DeletedProviderID {
 		log.Provider = model.ProviderConfig{
-			ID:   999,
+			ID:   model.DeletedProviderID,
 			Name: "已删除",
 		}
 		return
@@ -211,4 +254,15 @@ func (r *RequestLogRepository) GetTodayHourlyStats() ([]HourlyStats, error) {
 	err := r.db.Raw(query, startOfDay, endOfDay).Scan(&stats).Error
 
 	return stats, err
+}
+
+// CleanOldRequestBodies 清理指定天数前的请求体和响应体
+func (r *RequestLogRepository) CleanOldRequestBodies(days int) (int64, error) {
+	cutoffDate := time.Now().AddDate(0, 0, -days)
+	result := r.db.Exec(`
+		UPDATE request_logs
+		SET request_body = '', response_body = '', thinking_content = ''
+		WHERE created_at < ? AND (request_body != '' OR response_body != '' OR thinking_content != '')
+	`, cutoffDate)
+	return result.RowsAffected, result.Error
 }

@@ -1,7 +1,6 @@
 // 统计页面
 let chartInstance = null;
 let hourlyChartInstance = null;
-let echartsLoaded = false;
 let weeklyMode = false;
 let autoRefreshInterval = null;
 

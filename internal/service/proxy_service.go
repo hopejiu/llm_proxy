@@ -11,48 +11,45 @@ import (
 	"time"
 )
 
+// ProxyService 代理服务
 type ProxyService struct {
 	providerRepo   *repository.ProviderRepository
 	requestLogRepo *repository.RequestLogRepository
-	cache          providerCache
+	cacheMu        sync.RWMutex
+	providerCache  []model.ProviderConfig
+	cacheExpiry    time.Time
+	cacheTTL       time.Duration
 }
 
-func NewProxyService(providerRepo *repository.ProviderRepository, requestLogRepo *repository.RequestLogRepository) *ProxyService {
+// NewProxyService 创建代理服务实例
+func NewProxyService(providerRepo *repository.ProviderRepository, requestLogRepo *repository.RequestLogRepository, cacheTTL time.Duration) *ProxyService {
 	return &ProxyService{
 		providerRepo:   providerRepo,
 		requestLogRepo: requestLogRepo,
-		cache:          providerCache{ttl: 30 * time.Second},
+		cacheTTL:       cacheTTL,
 	}
 }
 
 // Close 关闭 ProxyService 持有的资源（当前无资源需要关闭）
 func (s *ProxyService) Close() {}
 
-// providerCache Provider 列表缓存
-type providerCache struct {
-	mu        sync.RWMutex
-	providers []model.ProviderConfig
-	expiry    time.Time
-	ttl       time.Duration
-}
-
 // getAllProvidersCached 获取 Provider 列表（优先读缓存）
 func (s *ProxyService) getAllProvidersCached() ([]model.ProviderConfig, error) {
-	s.cache.mu.RLock()
-	if time.Now().Before(s.cache.expiry) {
-		providers := s.cache.providers
-		s.cache.mu.RUnlock()
+	s.cacheMu.RLock()
+	if time.Now().Before(s.cacheExpiry) {
+		providers := s.providerCache
+		s.cacheMu.RUnlock()
 		return providers, nil
 	}
-	s.cache.mu.RUnlock()
+	s.cacheMu.RUnlock()
 
 	// 缓存过期，从数据库加载
-	s.cache.mu.Lock()
-	defer s.cache.mu.Unlock()
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
 
 	// 双重检查
-	if time.Now().Before(s.cache.expiry) {
-		return s.cache.providers, nil
+	if time.Now().Before(s.cacheExpiry) {
+		return s.providerCache, nil
 	}
 
 	providers, err := s.providerRepo.GetAll()
@@ -60,16 +57,16 @@ func (s *ProxyService) getAllProvidersCached() ([]model.ProviderConfig, error) {
 		return nil, err
 	}
 
-	s.cache.providers = providers
-	s.cache.expiry = time.Now().Add(s.cache.ttl)
+	s.providerCache = providers
+	s.cacheExpiry = time.Now().Add(s.cacheTTL)
 	return providers, nil
 }
 
 // InvalidateCache 主动失效缓存（Provider 增删改时调用）
 func (s *ProxyService) InvalidateCache() {
-	s.cache.mu.Lock()
-	defer s.cache.mu.Unlock()
-	s.cache.expiry = time.Time{}
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	s.cacheExpiry = time.Time{}
 }
 
 // GetAllProviders 获取所有 Provider
@@ -97,6 +94,7 @@ func (s *ProxyService) GetProviderByModel(modelName string) (*model.ProviderConf
 			return &providers[i], nil
 		}
 	}
+
 	for i := range providers {
 		if providers[i].Model == "" {
 			continue
@@ -109,14 +107,7 @@ func (s *ProxyService) GetProviderByModel(modelName string) (*model.ProviderConf
 	// 构建可用模型列表用于错误提示
 	var available []string
 	for _, p := range providers {
-		if p.Alias != "" {
-			for _, a := range strings.Split(p.Alias, ",") {
-				if trimmed := strings.TrimSpace(a); trimmed != "" {
-					available = append(available, trimmed)
-				}
-			}
-		}
-		available = append(available, p.Model)
+		available = append(available, p.GetModelNames()...)
 	}
 	return nil, fmt.Errorf("no provider found for model: %s, available models: %s", modelName, strings.Join(available, ", "))
 }
@@ -155,3 +146,5 @@ func (s *ProxyService) PrepareRequestBody(reqBody []byte, provider *model.Provid
 	}
 	return reqBody
 }
+
+

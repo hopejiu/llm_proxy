@@ -44,7 +44,7 @@ function renderProviders() {
                 <div class="flex flex-wrap gap-2">
                     <span class="tag tag-primary">${escapeHtml(p.model)}</span>
                     ${p.alias ? p.alias.split(',').map(a => `<span class="tag" style="background:#fef3c7;color:#92400e">${escapeHtml(a.trim())}</span>`).join('') : ''}
-                    ${p.api_type === 'anthropic' ? '<span class="tag" style="background:#f0abfc;color:#701a75">Anthropic</span>' : ''}
+
                 </div>
             </div>
             
@@ -105,11 +105,9 @@ function editProvider(id) {
     document.getElementById('urlSuffix').value = provider.url_suffix || '';
     onAutoSuffixChange();
     document.getElementById('apiKey').value = provider.api_key;
-    document.getElementById('apiType').value = provider.api_type || 'openai';
     document.getElementById('models').value = provider.model;
     document.getElementById('alias').value = provider.alias || '';
     document.getElementById('extraParams').value = provider.extra_params || '';
-    onApiTypeChange();
     
     openModal(true);
 }
@@ -125,7 +123,6 @@ async function duplicateProvider(id) {
         auto_suffix: provider.auto_suffix || false,
         url_suffix: provider.url_suffix || '',
         api_key: provider.api_key,
-        api_type: provider.api_type || 'openai',
         model: provider.model,
         alias: provider.alias || '',
         extra_params: provider.extra_params || '',
@@ -143,7 +140,7 @@ async function duplicateProvider(id) {
             loadProviders();
         } else {
             const error = await response.json();
-            showToast(error.error || '复制失败', 'error');
+            showToast(extractErrorMessage(error) || '复制失败', 'error');
         }
     } catch (error) {
         console.error('Failed to duplicate provider:', error);
@@ -174,7 +171,6 @@ async function saveProvider(event) {
         auto_suffix: document.getElementById('autoSuffix').checked,
         url_suffix: document.getElementById('urlSuffix').value,
         api_key: document.getElementById('apiKey').value,
-        api_type: document.getElementById('apiType').value,
         model: document.getElementById('models').value,
         alias: document.getElementById('alias').value.trim(),
         extra_params: extraParamsStr,
@@ -196,7 +192,7 @@ async function saveProvider(event) {
             loadProviders();
         } else {
             const error = await response.json();
-            showToast(error.error || '操作失败', 'error');
+            showToast(extractErrorMessage(error) || '操作失败', 'error');
         }
     } catch (error) {
         console.error('Failed to save provider:', error);
@@ -287,7 +283,7 @@ async function importProviders(event) {
             loadProviders();
         } else {
             const error = await response.json();
-            showToast(error.error || '导入失败', 'error');
+            showToast(extractErrorMessage(error) || '导入失败', 'error');
         }
     } catch (error) {
         console.error('Failed to import providers:', error);
@@ -324,25 +320,6 @@ async function setupCodeBuddy() {
         console.error('Failed to setup CodeBuddy:', error);
         showToast('配置失败', 'error');
     }
-}
-
-// API 类型切换时更新占位符和后缀
-function onApiTypeChange() {
-    const apiType = document.getElementById('apiType').value;
-    const baseURLInput = document.getElementById('baseURL');
-    const suffixInput = document.getElementById('urlSuffix');
-    const modelsInput = document.getElementById('models');
-
-    if (apiType === 'anthropic') {
-        baseURLInput.placeholder = 'https://api.anthropic.com';
-        suffixInput.value = '/v1/messages';
-        modelsInput.placeholder = 'claude-sonnet-4-20250514';
-    } else {
-        baseURLInput.placeholder = 'https://api.example.com';
-        suffixInput.value = '/v1/chat/completions';
-        modelsInput.placeholder = 'deepseek-chat';
-    }
-    updateUrlPreview();
 }
 
 // 自动拼接后缀开关切换

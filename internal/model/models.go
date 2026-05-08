@@ -5,6 +5,9 @@ import (
 	"time"
 )
 
+// DeletedProviderID 当 Provider 被删除时，关联日志的 ProviderID 置为此值
+const DeletedProviderID uint = 999
+
 // ProviderConfig 第三方LLM服务商配置
 type ProviderConfig struct {
 	ID          uint      `json:"id" gorm:"primaryKey"`
@@ -15,15 +18,18 @@ type ProviderConfig struct {
 	APIKey      string    `json:"api_key" gorm:"size:500;not null"`
 	Model       string    `json:"model" gorm:"size:100"`                      // 模型名称
 	Alias       string    `json:"alias" gorm:"size:200"`                      // 别名，多个用逗号分隔，用于模型名路由匹配
-	APIType     string    `json:"api_type" gorm:"size:20;default:openai"`     // API类型: openai 或 anthropic
 	ExtraParams string    `json:"extra_params" gorm:"type:text"`              // 自定义请求参数JSON
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
-// IsAnthropic 判断是否为 Anthropic 类型的 Provider
-func (p *ProviderConfig) IsAnthropic() bool {
-	return p.APIType == "anthropic"
+// MaskAPIKey 返回脱敏后的 API Key，只显示前4位和后4位
+func (p *ProviderConfig) MaskAPIKey() string {
+	key := p.APIKey
+	if len(key) <= 8 {
+		return "****"
+	}
+	return key[:4] + "****" + key[len(key)-4:]
 }
 
 // GetDisplayName 获取用于模型列表显示的名称，优先别名
@@ -70,11 +76,11 @@ type RequestLog struct {
 	InputTokens     int       `json:"input_tokens"`
 	OutputTokens    int       `json:"output_tokens"`
 	TotalTokens     int       `json:"total_tokens"`
-	CachedTokens    int       `json:"cached_tokens"`                         // 缓存token数
-	RequestBody     string    `json:"request_body" gorm:"type:longtext"`     // 完整请求JSON
-	ResponseBody    string    `json:"response_body" gorm:"type:longtext"`    // 完整响应JSON
-	ResponseContent string    `json:"response_content" gorm:"type:longtext"` // 解析后的可读响应内容（stream类型拼接后的完整内容）
-	ThinkingContent string    `json:"thinking_content" gorm:"type:longtext"` // 推理/thinking内容
+	CachedTokens    int       `json:"cached_tokens"`                                                    // 缓存token数
+	RequestBody     string    `json:"request_body" gorm:"type:longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"`     // 完整请求JSON
+	ResponseBody    string    `json:"response_body" gorm:"type:longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"`    // 完整响应JSON
+	ResponseContent string    `json:"response_content" gorm:"type:longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"` // 解析后的可读响应内容（stream类型拼接后的完整内容）
+	ThinkingContent string    `json:"thinking_content" gorm:"type:longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"` // 推理/thinking内容
 	Status          string    `json:"status" gorm:"size:20"`                 // success/error
 	ErrorMessage    string    `json:"error_message" gorm:"size:1000"`
 	Duration        int64     `json:"duration"` // 请求耗时(毫秒)
@@ -89,48 +95,4 @@ type TokenStats struct {
 	TotalTokens       int64  `json:"total_tokens" gorm:"column:total_tokens"`
 	TotalCachedTokens int64  `json:"total_cached_tokens" gorm:"column:total_cached_tokens"`
 	RequestCount      int64  `json:"request_count" gorm:"column:request_count"`
-}
-
-// OpenAIRequest OpenAI兼容请求格式
-type OpenAIRequest struct {
-	Model    string    `json:"model"`
-	Stream   bool      `json:"stream,omitempty"`
-}
-
-
-// OpenAIResponse OpenAI兼容响应格式
-type OpenAIResponse struct {
-	Choices []Choice `json:"choices"`
-	Usage   Usage    `json:"usage"`
-}
-
-type Choice struct {
-	Index        int         `json:"index"`
-	Message      ChatMessage `json:"message"`
-	FinishReason string      `json:"finish_reason"`
-}
-
-type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-
-
-type Usage struct {
-	PromptTokens          int                       `json:"prompt_tokens"`
-	CompletionTokens      int                       `json:"completion_tokens"`
-	TotalTokens           int                       `json:"total_tokens"`
-	PromptTokensDetails   *PromptTokensDetails      `json:"prompt_tokens_details,omitempty"`
-	CompletionTokensDetails *CompletionTokensDetails `json:"completion_tokens_details,omitempty"`
-}
-
-// PromptTokensDetails prompt token详情
-type PromptTokensDetails struct {
-	CachedTokens int `json:"cached_tokens"`
-}
-
-// CompletionTokensDetails completion token详情
-type CompletionTokensDetails struct {
-	ReasoningTokens int `json:"reasoning_tokens"`
 }

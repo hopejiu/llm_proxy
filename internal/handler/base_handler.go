@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"llm-proxy/internal/converter"
 	"llm-proxy/internal/model"
 	"llm-proxy/internal/repository"
 	"llm-proxy/internal/service"
@@ -19,29 +20,41 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const (
-	DefaultHTTPTimeout     = 300 * time.Second
-	DefaultLogFilePerm     = 0666
-	StreamFirstByteTimeout = 5 * time.Second
-	StreamMaxRetries       = 10
-	RetryDelayBase         = 500 * time.Millisecond
-)
+// UpstreamError 上游 API 返回的错误，携带状态码和响应体
+type UpstreamError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *UpstreamError) Error() string {
+	return fmt.Sprintf("HTTP %d: %s", e.StatusCode, e.Body)
+}
+
+// HandlerConfig Handler 层可配置参数
+type HandlerConfig struct {
+	HTTPTimeout            time.Duration
+	StreamFirstByteTimeout time.Duration
+	StreamMaxRetries       int
+	RetryDelayBase         time.Duration
+}
 
 // BaseHandler 公共基类，封装 Handler 的公共字段和方法
 type BaseHandler struct {
 	proxyService   *service.ProxyService
 	requestLogRepo *repository.RequestLogRepository
 	httpClient     *http.Client
+	config         HandlerConfig
 }
 
 // NewBaseHandler 创建 BaseHandler 实例
-func NewBaseHandler(proxyService *service.ProxyService, requestLogRepo *repository.RequestLogRepository) *BaseHandler {
+func NewBaseHandler(proxyService *service.ProxyService, requestLogRepo *repository.RequestLogRepository, cfg HandlerConfig) *BaseHandler {
 	return &BaseHandler{
 		proxyService:   proxyService,
 		requestLogRepo: requestLogRepo,
 		httpClient: &http.Client{
-			Timeout: DefaultHTTPTimeout,
+			Timeout: cfg.HTTPTimeout,
 		},
+		config: cfg,
 	}
 }
 
@@ -83,6 +96,14 @@ func (h *BaseHandler) SendStreamRequestWithHeaders(ctx context.Context, url stri
 				httpReq.Header.Add(key, value)
 			}
 		}
+		// Go 的 http.Client.Do() 会忽略 Header map 中的 Host key，
+		// 实际发送的 Host header 取自 httpReq.Host 字段。
+		// 部分API网关（如讯飞）的HMAC签名校验要求 host 请求头必须参与签名，
+		// 因此需要将 extraHeaders 中的 host 同步到 httpReq.Host。
+		if hostValues := extraHeaders.Values("host"); len(hostValues) > 0 {
+			httpReq.Host = hostValues[0]
+			delete(httpReq.Header, "Host")
+		}
 	}
 
 	httpResp, err := h.httpClient.Do(httpReq)
@@ -93,7 +114,7 @@ func (h *BaseHandler) SendStreamRequestWithHeaders(ctx context.Context, url stri
 	if httpResp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(httpResp.Body)
 		httpResp.Body.Close()
-		return nil, fmt.Errorf("HTTP %d: %s", httpResp.StatusCode, string(respBody))
+		return nil, &UpstreamError{StatusCode: httpResp.StatusCode, Body: string(respBody)}
 	}
 
 	return httpResp, nil
@@ -121,6 +142,14 @@ func (h *BaseHandler) SendRequestWithHeaders(ctx context.Context, url string, bo
 				httpReq.Header.Add(key, value)
 			}
 		}
+		// Go 的 http.Client.Do() 会忽略 Header map 中的 Host key，
+		// 实际发送的 Host header 取自 httpReq.Host 字段。
+		// 部分API网关（如讯飞）的HMAC签名校验要求 host 请求头必须参与签名，
+		// 因此需要将 extraHeaders 中的 host 同步到 httpReq.Host。
+		if hostValues := extraHeaders.Values("host"); len(hostValues) > 0 {
+			httpReq.Host = hostValues[0]
+			delete(httpReq.Header, "Host")
+		}
 	}
 
 	httpResp, err := h.httpClient.Do(httpReq)
@@ -135,64 +164,35 @@ func (h *BaseHandler) SendRequestWithHeaders(ctx context.Context, url string, bo
 	}
 
 	if httpResp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d: %s", httpResp.StatusCode, string(respBody))
+		return nil, &UpstreamError{StatusCode: httpResp.StatusCode, Body: string(respBody)}
 	}
 
 	return respBody, nil
 }
 
-// ReadStreamLines 通用 SSE 流式行读取，对每行调用回调函数
-// 返回读取过程中遇到的错误
-func (h *BaseHandler) ReadStreamLines(resp *http.Response, onLine func(line string)) error {
-	scanner := bufio.NewScanner(resp.Body)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line != "" {
-			onLine(line)
-		}
-	}
-	return scanner.Err()
-}
-
 // ExtractUsage 从 OpenAI 格式响应数据中提取 token 使用量
 func (h *BaseHandler) ExtractUsage(data map[string]interface{}) (inputTokens, outputTokens, totalTokens, cachedTokens int) {
-	if usage, ok := data["usage"].(map[string]interface{}); ok {
-		if pt, ok := usage["prompt_tokens"].(float64); ok {
-			inputTokens = int(pt)
-		}
-		if ct, ok := usage["completion_tokens"].(float64); ok {
-			outputTokens = int(ct)
-		}
-		if tt, ok := usage["total_tokens"].(float64); ok {
-			totalTokens = int(tt)
-		}
-		// 从 prompt_tokens_details 中提取 cached_tokens
-		if ptd, ok := usage["prompt_tokens_details"].(map[string]interface{}); ok {
-			if cht, ok := ptd["cached_tokens"].(float64); ok {
-				cachedTokens = int(cht)
-			}
-		}
-	}
-	return
+	return converter.ExtractUsage(data)
 }
 
-// ExtractAnthropicUsage 从 Anthropic 格式 usage 中提取 token 数
-func (h *BaseHandler) ExtractAnthropicUsage(data map[string]interface{}) (inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens int) {
-	if usage, ok := data["usage"].(map[string]interface{}); ok {
-		if it, ok := usage["input_tokens"].(float64); ok {
-			inputTokens = int(it)
+// SendRequestWithRetry 发送普通 HTTP 请求（带重试）
+func (h *BaseHandler) SendRequestWithRetry(ctx context.Context, url string, body []byte, apiKey string, maxRetries int) ([]byte, error) {
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		if attempt > 1 {
+			retryDelay := time.Duration(attempt) * h.config.RetryDelayBase
+			slog.Warn("非流式请求重试", "url", url, "attempt", attempt, "maxRetries", maxRetries, "delay", retryDelay)
+			time.Sleep(retryDelay)
 		}
-		if ot, ok := usage["output_tokens"].(float64); ok {
-			outputTokens = int(ot)
+
+		respBody, err := h.SendRequest(ctx, url, body, apiKey)
+		if err == nil {
+			return respBody, nil
 		}
-		if cc, ok := usage["cache_creation_input_tokens"].(float64); ok {
-			cacheCreationTokens = int(cc)
-		}
-		if cr, ok := usage["cache_read_input_tokens"].(float64); ok {
-			cacheReadTokens = int(cr)
-		}
+		lastErr = err
+		slog.Error("非流式请求失败", "url", url, "attempt", attempt, "error", err)
 	}
-	return
+	return nil, lastErr
 }
 
 // ReadBody 读取请求体并重置 Body，允许后续读取
@@ -205,9 +205,24 @@ func (h *BaseHandler) ReadBody(c *gin.Context) ([]byte, error) {
 	return body, nil
 }
 
-// SaveRequestLog 保存请求日志
+// maxBodySize 请求体/响应体存储的最大字节数（超过截断）
+const maxBodySize = 64 * 1024 // 64KB
+
+// truncateBody 截断过长的请求体/响应体
+func truncateBody(body string) string {
+	if len(body) <= maxBodySize {
+		return body
+	}
+	return body[:maxBodySize] + "\n...[truncated]"
+}
+
+// SaveRequestLog 保存请求日志（自动截断过长的请求体/响应体）
 func (h *BaseHandler) SaveRequestLog(reqLog *model.RequestLog) {
-	h.requestLogRepo.Create(reqLog)
+	reqLog.RequestBody = truncateBody(reqLog.RequestBody)
+	reqLog.ResponseBody = truncateBody(reqLog.ResponseBody)
+	if err := h.requestLogRepo.Create(reqLog); err != nil {
+		slog.Error("保存请求日志失败", "error", err)
+	}
 }
 
 // CreateRequestLog 创建请求日志对象
@@ -226,11 +241,11 @@ type StreamRetryConfig struct {
 	MaxRetries       int
 }
 
-// DefaultStreamRetryConfig 返回默认的流式重试配置
-func DefaultStreamRetryConfig() StreamRetryConfig {
+// DefaultStreamRetryConfig 返回基于当前配置的流式重试配置
+func (h *BaseHandler) DefaultStreamRetryConfig() StreamRetryConfig {
 	return StreamRetryConfig{
-		FirstByteTimeout: StreamFirstByteTimeout,
-		MaxRetries:       StreamMaxRetries,
+		FirstByteTimeout: h.config.StreamFirstByteTimeout,
+		MaxRetries:       h.config.StreamMaxRetries,
 	}
 }
 
@@ -259,12 +274,12 @@ func (h *BaseHandler) ExecuteStreamWithRetry(
 ) (responseBuilder strings.Builder, tokens StreamTokens, lastErr error) {
 	for attempt := 1; attempt <= config.MaxRetries; attempt++ {
 		attemptStartTime := time.Now()
-		
+
 		if attempt == 1 {
 			slog.Info("开始流式请求", "provider", provider.Name, "model", provider.Model)
 		} else {
 			// 重试延迟：次数 * 0.5s
-			retryDelay := time.Duration(attempt) * RetryDelayBase
+			retryDelay := time.Duration(attempt) * h.config.RetryDelayBase
 			slog.Warn("流式请求失败，正在重试", "provider", provider.Name, "model", provider.Model, "attempt", attempt, "maxRetries", config.MaxRetries, "delay", retryDelay)
 			sleepStart := time.Now()
 			time.Sleep(retryDelay)
@@ -275,7 +290,7 @@ func (h *BaseHandler) ExecuteStreamWithRetry(
 		httpStartTime := time.Now()
 		httpResp, err := h.SendStreamRequest(ctx, provider.GetRequestURL(), body, provider.APIKey)
 		httpDuration := time.Since(httpStartTime)
-		
+
 		if err != nil {
 			slog.Error("发送HTTP请求失败", "provider", provider.Name, "attempt", attempt, "duration", httpDuration, "error", err)
 			lastErr = err
@@ -288,7 +303,7 @@ func (h *BaseHandler) ExecuteStreamWithRetry(
 		httpResp.Body.Close()
 
 		attemptDuration := time.Since(attemptStartTime)
-		
+
 		if success {
 			slog.Info("流式请求成功", "provider", provider.Name, "attempt", attempt, "total_duration", attemptDuration)
 			return responseBuilder, tokens, nil
@@ -421,13 +436,13 @@ func (h *BaseHandler) readStreamWithFirstByteTimeout(
 	readStartTime := time.Now()
 	err = <-doneChan
 	readDuration := time.Since(readStartTime)
-	
+
 	if err == nil {
 		slog.Debug("stream读取完成", "read_duration", readDuration)
 	} else {
 		slog.Debug("stream读取出错", "read_duration", readDuration, "error", err)
 	}
-	
+
 	return err == nil, false, err
 }
 

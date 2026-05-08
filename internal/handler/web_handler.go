@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -40,10 +41,14 @@ func (h *WebHandler) GetProviders(c *gin.Context) {
 	providers, err := h.providerService.GetAllProviders()
 	if err != nil {
 		slog.Error("获取所有Provider失败", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, ErrInternal, "获取Provider列表失败")
 		return
 	}
-	c.JSON(http.StatusOK, providers)
+	// 脱敏 API Key
+	for i := range providers {
+		providers[i].APIKey = providers[i].MaskAPIKey()
+	}
+	respondOK(c, providers)
 }
 
 // GetProvider 获取单个Provider
@@ -51,17 +56,18 @@ func (h *WebHandler) GetProvider(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		slog.Error("解析Provider ID失败", "error", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		respondError(c, http.StatusBadRequest, ErrBadRequest, "无效的Provider ID")
 		return
 	}
 
 	provider, err := h.providerService.GetProvider(uint(id))
 	if err != nil {
 		slog.Error("获取Provider失败", "id", id, "error", err)
-		c.JSON(http.StatusNotFound, gin.H{"error": "provider not found"})
+		respondError(c, http.StatusNotFound, ErrNotFound, "Provider不存在")
 		return
 	}
-	c.JSON(http.StatusOK, provider)
+	provider.APIKey = provider.MaskAPIKey()
+	respondOK(c, provider)
 }
 
 // CreateProvider 创建Provider
@@ -69,17 +75,17 @@ func (h *WebHandler) CreateProvider(c *gin.Context) {
 	var provider model.ProviderConfig
 	if err := c.ShouldBindJSON(&provider); err != nil {
 		slog.Error("绑定Provider JSON失败", "error", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, http.StatusBadRequest, ErrInvalidInput, "请求参数格式错误")
 		return
 	}
 
 	if err := h.providerService.CreateProvider(&provider); err != nil {
 		slog.Error("创建Provider失败", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, ErrInternal, "创建Provider失败")
 		return
 	}
 
-	c.JSON(http.StatusCreated, provider)
+	respondCreated(c, provider)
 }
 
 // UpdateProvider 更新Provider
@@ -87,25 +93,35 @@ func (h *WebHandler) UpdateProvider(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		slog.Error("解析Provider ID失败", "error", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		respondError(c, http.StatusBadRequest, ErrBadRequest, "无效的Provider ID")
 		return
 	}
 
 	var provider model.ProviderConfig
 	if err := c.ShouldBindJSON(&provider); err != nil {
 		slog.Error("绑定Provider JSON失败", "error", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, http.StatusBadRequest, ErrInvalidInput, "请求参数格式错误")
 		return
 	}
 
 	provider.ID = uint(id)
+
+	// 如果 API Key 是脱敏格式（包含 ****），保留原有密钥
+	if strings.Contains(provider.APIKey, "****") {
+		existing, err := h.providerService.GetProvider(provider.ID)
+		if err == nil {
+			provider.APIKey = existing.APIKey
+		}
+	}
+
 	if err := h.providerService.UpdateProvider(&provider); err != nil {
 		slog.Error("更新Provider失败", "id", id, "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, ErrInternal, "更新Provider失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, provider)
+	provider.APIKey = provider.MaskAPIKey()
+	respondOK(c, provider)
 }
 
 // DeleteProvider 删除Provider
@@ -113,17 +129,17 @@ func (h *WebHandler) DeleteProvider(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		slog.Error("解析Provider ID失败", "error", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		respondError(c, http.StatusBadRequest, ErrBadRequest, "无效的Provider ID")
 		return
 	}
 
 	if err := h.providerService.DeleteProvider(uint(id)); err != nil {
 		slog.Error("删除Provider失败", "id", id, "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, ErrInternal, "删除Provider失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "deleted successfully"})
+	respondOK(c, gin.H{"message": "deleted successfully"})
 }
 
 // GetStats 获取统计数据
@@ -131,10 +147,10 @@ func (h *WebHandler) GetStats(c *gin.Context) {
 	stats, err := h.statsService.GetDashboardStats()
 	if err != nil {
 		slog.Error("获取仪表盘统计失败", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, ErrInternal, "获取统计数据失败")
 		return
 	}
-	c.JSON(http.StatusOK, stats)
+	respondOK(c, stats)
 }
 
 // GetDailyStats 获取每日统计
@@ -142,10 +158,10 @@ func (h *WebHandler) GetDailyStats(c *gin.Context) {
 	stats, err := h.statsService.GetLast30DaysStats()
 	if err != nil {
 		slog.Error("获取30天统计失败", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, ErrInternal, "获取每日统计失败")
 		return
 	}
-	c.JSON(http.StatusOK, stats)
+	respondOK(c, stats)
 }
 
 // GetRecentLogs 获取最近日志
@@ -160,10 +176,10 @@ func (h *WebHandler) GetRecentLogs(c *gin.Context) {
 	logs, err := h.statsService.GetRecentLogs(limit)
 	if err != nil {
 		slog.Error("获取最近日志失败", "limit", limit, "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, ErrInternal, "获取日志列表失败")
 		return
 	}
-	c.JSON(http.StatusOK, logs)
+	respondOK(c, logs)
 }
 
 // ExportProviders 导出所有Provider配置为JSON
@@ -171,12 +187,12 @@ func (h *WebHandler) ExportProviders(c *gin.Context) {
 	providers, err := h.providerService.GetAllProviders()
 	if err != nil {
 		slog.Error("导出Provider失败", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, ErrInternal, "导出Provider失败")
 		return
 	}
 
 	c.Header("Content-Disposition", "attachment; filename=providers.json")
-	c.JSON(http.StatusOK, providers)
+	respondOK(c, providers)
 }
 
 // ImportProviders 导入JSON配置并覆盖现有数据
@@ -184,7 +200,7 @@ func (h *WebHandler) ImportProviders(c *gin.Context) {
 	var providers []model.ProviderConfig
 	if err := c.ShouldBindJSON(&providers); err != nil {
 		slog.Error("绑定导入JSON失败", "error", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, http.StatusBadRequest, ErrInvalidInput, "导入数据格式错误")
 		return
 	}
 
@@ -195,11 +211,11 @@ func (h *WebHandler) ImportProviders(c *gin.Context) {
 
 	if err := h.providerService.ImportAll(providers); err != nil {
 		slog.Error("导入Provider失败", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, ErrInternal, "导入Provider失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "imported successfully", "count": len(providers)})
+	respondOK(c, gin.H{"message": "imported successfully", "count": len(providers)})
 }
 
 // GetLogDetail 获取单条请求日志详情
@@ -207,18 +223,18 @@ func (h *WebHandler) GetLogDetail(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		slog.Error("解析Log ID失败", "error", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		respondError(c, http.StatusBadRequest, ErrBadRequest, "无效的日志ID")
 		return
 	}
 
 	logDetail, err := h.statsService.GetLogDetail(uint(id))
 	if err != nil {
 		slog.Error("获取日志详情失败", "id", id, "error", err)
-		c.JSON(http.StatusNotFound, gin.H{"error": "log not found"})
+		respondError(c, http.StatusNotFound, ErrNotFound, "日志不存在")
 		return
 	}
 
-	c.JSON(http.StatusOK, logDetail)
+	respondOK(c, logDetail)
 }
 
 // GetTodayHourlyStats 获取今日分时统计
@@ -226,10 +242,10 @@ func (h *WebHandler) GetTodayHourlyStats(c *gin.Context) {
 	stats, err := h.statsService.GetTodayHourlyStats()
 	if err != nil {
 		slog.Error("获取今日分时统计失败", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, ErrInternal, "获取分时统计失败")
 		return
 	}
-	c.JSON(http.StatusOK, stats)
+	respondOK(c, stats)
 }
 
 // CodeBuddyModel CodeBuddy models.json 中的模型结构
@@ -256,7 +272,7 @@ func (h *WebHandler) SetupCodeBuddy(c *gin.Context) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		slog.Error("获取用户目录失败", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法获取用户目录"})
+		respondError(c, http.StatusInternalServerError, ErrInternal, "获取用户目录失败")
 		return
 	}
 
@@ -267,7 +283,7 @@ func (h *WebHandler) SetupCodeBuddy(c *gin.Context) {
 	// 创建目录（如果不存在）
 	if err := os.MkdirAll(codebuddyDir, 0755); err != nil {
 		slog.Error("创建.codebuddy目录失败", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法创建.codebuddy目录"})
+		respondError(c, http.StatusInternalServerError, ErrInternal, "创建配置目录失败")
 		return
 	}
 
@@ -315,13 +331,13 @@ func (h *WebHandler) SetupCodeBuddy(c *gin.Context) {
 	data, err := json.MarshalIndent(config, "", "    ")
 	if err != nil {
 		slog.Error("序列化models.json失败", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法序列化配置"})
+		respondError(c, http.StatusInternalServerError, ErrInternal, "序列化配置失败")
 		return
 	}
 
 	if err := os.WriteFile(modelsFilePath, data, 0644); err != nil {
 		slog.Error("写入models.json失败", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法写入配置文件"})
+		respondError(c, http.StatusInternalServerError, ErrInternal, "写入配置文件失败")
 		return
 	}
 

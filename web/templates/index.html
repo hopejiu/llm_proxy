@@ -100,14 +100,6 @@
                         <input type="text" id="name" class="form-input" placeholder="例如：DeepSeek" required>
                     </div>
                     <div>
-                        <label class="form-label">API 类型</label>
-                        <select id="apiType" class="form-input" onchange="onApiTypeChange()">
-                            <option value="openai">OpenAI 兼容</option>
-                            <option value="anthropic">Anthropic</option>
-                        </select>
-                        <p class="text-xs text-gray-400 mt-1">Anthropic 类型将直接透传请求，支持 Claude Code 等工具</p>
-                    </div>
-                    <div>
                         <label class="form-label">Base URL</label>
                         <input type="url" id="baseURL" class="form-input" placeholder="https://api.example.com" oninput="updateUrlPreview()" required>
                         <div class="flex items-center space-x-2 mt-2">

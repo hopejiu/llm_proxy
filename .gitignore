@@ -4,6 +4,7 @@
 # Hidden folders
 .codebuddy/
 .venv/
+.claude
 
 # Compiled files
 *.exe
@@ -20,3 +21,4 @@
 Thumbs.db
 
 dist
+
