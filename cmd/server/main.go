@@ -26,7 +26,7 @@ import (
 )
 
 func main() {
-	if err := logger.Init("llm-proxy.log"); err != nil {
+	if err := logger.Init("llm-proxy.log", slog.LevelInfo); err != nil {
 		fmt.Printf("无法创建日志文件: %v\n", err)
 		pauseAndExit()
 	}
@@ -37,20 +37,34 @@ func main() {
 	fmt.Println()
 
 	cfg := config.Load()
+
+	// 根据配置重新设置日志级别
+	logger.Init("llm-proxy.log", logger.ParseLevel(cfg.LogLevel))
 	slog.Info("配置加载成功")
 
 	db := initDB(cfg)
 
 	providerRepo := repository.NewProviderRepository(db)
 	requestLogRepo := repository.NewRequestLogRepository(db, cfg.DBType)
+	hourlyStatRepo := repository.NewHourlyStatRepository(db, cfg.DBType)
 
+	// 启动时回填历史汇总数据
+	fmt.Println("→ 正在回填历史汇总数据...")
+	cleanupSvc := service.NewCleanupService(hourlyStatRepo, requestLogRepo, cfg.LogCleanupDays)
+	if err := cleanupSvc.BackfillMissingHours(); err != nil {
+		slog.Warn("回填历史汇总数据失败", "error", err)
+	} else {
+		fmt.Println("✓ 历史汇总数据回填完成")
+	}
+
+	// 启动时清理旧数据
 	fmt.Println("→ 正在清理旧数据...")
 	cleanOldData(requestLogRepo, cfg.LogCleanupDays)
 	fmt.Println("✓ 数据清理完成")
 
 	proxyService := service.NewProxyService(providerRepo, requestLogRepo, cfg.ProviderCacheTTL)
 	providerService := service.NewProviderService(providerRepo, proxyService)
-	statsService := service.NewStatsService(requestLogRepo)
+	statsService := service.NewStatsService(hourlyStatRepo, requestLogRepo)
 
 	webHandler := handler.NewWebHandler(providerService, statsService)
 
@@ -74,6 +88,10 @@ func main() {
 
 	// 等待端口就绪
 	waitForPort(cfg.WebPort, 2*time.Second)
+
+	// 启动定时汇总和清理 goroutine
+	ctx, cancel := context.WithCancel(context.Background())
+	go cleanupSvc.Start(ctx)
 
 	fmt.Println()
 	fmt.Println("╔════════════════════════════════════════════════════════════╗")
@@ -107,6 +125,7 @@ func main() {
 	fmt.Println("→ 正在关闭服务...")
 	slog.Info("正在关闭服务...")
 
+	cancel()
 	shutdownServer(webServer, "Web")
 	shutdownServer(proxyServer, "Proxy")
 	proxyService.Close()
@@ -126,7 +145,7 @@ func initDB(cfg *config.Config) *gorm.DB {
 
 	if cfg.IsSQLite() {
 		fmt.Println("→ 正在连接 SQLite 数据库...")
-		dbPath := cfg.SQLiteDSN()
+		dbPath := cfg.SQLitePath()
 		if _, err := os.Stat(dbPath); os.IsNotExist(err) {
 			fmt.Printf("  SQLite 文件不存在，正在创建: %s\n", dbPath)
 			if err := os.WriteFile(dbPath, []byte{}, 0644); err != nil {
@@ -136,12 +155,15 @@ func initDB(cfg *config.Config) *gorm.DB {
 			}
 			fmt.Println("  ✓ SQLite 文件创建成功")
 		}
-		db, err = gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+		db, err = gorm.Open(sqlite.Open(cfg.SQLiteDSN()), &gorm.Config{})
 		if err != nil {
 			fmt.Println("✗ SQLite数据库连接失败")
 			slog.Error("SQLite数据库连接失败", "error", err, "path", dbPath)
 			pauseAndExit()
 		}
+		// SQLite 单写连接，避免锁冲突
+		sqlDB, _ := db.DB()
+		sqlDB.SetMaxOpenConns(1)
 	} else {
 		fmt.Println("→ 正在连接 MySQL 数据库...")
 		db, err = gorm.Open(mysql.Open(cfg.DSN()), &gorm.Config{})
@@ -150,12 +172,18 @@ func initDB(cfg *config.Config) *gorm.DB {
 			slog.Error("数据库连接失败", "error", err)
 			pauseAndExit()
 		}
+		// MySQL 连接池配置
+		sqlDB, _ := db.DB()
+		sqlDB.SetMaxOpenConns(25)
+		sqlDB.SetMaxIdleConns(10)
+		sqlDB.SetConnMaxLifetime(5 * time.Minute)
+		sqlDB.SetConnMaxIdleTime(time.Minute)
 	}
 	fmt.Println("✓ 数据库连接成功")
 	slog.Info("数据库连接成功")
 
 	fmt.Println("→ 正在初始化数据库表...")
-	if err := db.AutoMigrate(&model.ProviderConfig{}, &model.RequestLog{}); err != nil {
+	if err := db.AutoMigrate(&model.ProviderConfig{}, &model.RequestLog{}, &model.HourlyStat{}); err != nil {
 		fmt.Println("✗ 数据库初始化失败")
 		slog.Error("数据库初始化失败", "error", err)
 		pauseAndExit()
@@ -169,10 +197,27 @@ func initDB(cfg *config.Config) *gorm.DB {
 		}
 	}
 
+	// 确保旧数据库也能获得索引（GORM AutoMigrate 对已有表不会自动添加新索引）
+	createIndexesIfNotExist(db)
+
 	fmt.Println("✓ 数据库表初始化完成")
 	slog.Info("数据库表初始化完成")
 
 	return db
+}
+
+// createIndexesIfNotExist 为已有数据库创建索引
+func createIndexesIfNotExist(db *gorm.DB) {
+	indexes := []string{
+		"CREATE INDEX IF NOT EXISTS idx_request_logs_created_at_status ON request_logs(created_at, status)",
+		"CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON request_logs(created_at)",
+		"CREATE INDEX IF NOT EXISTS idx_request_logs_provider_id ON request_logs(provider_id)",
+	}
+	for _, idx := range indexes {
+		if err := db.Exec(idx).Error; err != nil {
+			slog.Warn("创建索引失败", "sql", idx, "error", err)
+		}
+	}
 }
 
 // waitForPort 等待端口就绪（替代 time.Sleep 的硬等待）
@@ -228,12 +273,12 @@ func shutdownServer(server *http.Server, name string) {
 }
 
 func cleanOldData(requestLogRepo *repository.RequestLogRepository, cleanupDays int) {
-	rowsAffected, err := requestLogRepo.CleanOldRequestBodies(cleanupDays)
+	rowsAffected, err := requestLogRepo.DeleteOldRequestLogs(cleanupDays)
 	if err != nil {
 		slog.Error("清理数据库旧数据失败", "error", err)
 		fmt.Printf("  ✗ 清理数据库失败: %v\n", err)
 	} else if rowsAffected > 0 {
-		slog.Info("已清理旧请求/响应体数据", "rowsAffected", rowsAffected, "days", cleanupDays)
+		slog.Info("已删除旧请求数据", "rowsAffected", rowsAffected, "days", cleanupDays)
 		fmt.Printf("  - 清理数据库: %d 条记录\n", rowsAffected)
 	}
 

@@ -20,6 +20,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// requestIDKey 用于在 context 中存储请求 ID
+type requestIDKey struct{}
+
 // UpstreamError 上游 API 返回的错误，携带状态码和响应体
 type UpstreamError struct {
 	StatusCode int
@@ -56,6 +59,24 @@ func NewBaseHandler(proxyService *service.ProxyService, requestLogRepo *reposito
 		},
 		config: cfg,
 	}
+}
+
+// generateRequestID 生成请求 ID
+func generateRequestID() string {
+	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
+// contextWithRequestID 创建携带请求 ID 的 context
+func contextWithRequestID(ctx context.Context, requestID string) context.Context {
+	return context.WithValue(ctx, requestIDKey{}, requestID)
+}
+
+// requestIDFromContext 从 context 中获取请求 ID
+func requestIDFromContext(ctx context.Context) string {
+	if id, ok := ctx.Value(requestIDKey{}).(string); ok {
+		return id
+	}
+	return ""
 }
 
 // GetProviderByModel 根据模型名匹配 Provider
@@ -181,7 +202,7 @@ func (h *BaseHandler) SendRequestWithRetry(ctx context.Context, url string, body
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		if attempt > 1 {
 			retryDelay := time.Duration(attempt) * h.config.RetryDelayBase
-			slog.Warn("非流式请求重试", "url", url, "attempt", attempt, "maxRetries", maxRetries, "delay", retryDelay)
+			slog.Debug("非流式请求重试", "url", url, "attempt", attempt, "maxRetries", maxRetries, "delay", retryDelay)
 			time.Sleep(retryDelay)
 		}
 
@@ -190,7 +211,7 @@ func (h *BaseHandler) SendRequestWithRetry(ctx context.Context, url string, body
 			return respBody, nil
 		}
 		lastErr = err
-		slog.Error("非流式请求失败", "url", url, "attempt", attempt, "error", err)
+		slog.Debug("非流式请求失败", "url", url, "attempt", attempt, "error", err)
 	}
 	return nil, lastErr
 }
@@ -275,15 +296,15 @@ func (h *BaseHandler) ExecuteStreamWithRetry(
 	for attempt := 1; attempt <= config.MaxRetries; attempt++ {
 		attemptStartTime := time.Now()
 
-		if attempt == 1 {
-			slog.Info("开始流式请求", "provider", provider.Name, "model", provider.Model)
-		} else {
+		if attempt > 1 {
+			// 重试前清空上次的部分数据
+			responseBuilder.Reset()
+			tokens = StreamTokens{}
+
 			// 重试延迟：次数 * 0.5s
 			retryDelay := time.Duration(attempt) * h.config.RetryDelayBase
-			slog.Warn("流式请求失败，正在重试", "provider", provider.Name, "model", provider.Model, "attempt", attempt, "maxRetries", config.MaxRetries, "delay", retryDelay)
-			sleepStart := time.Now()
+			slog.Warn("流式请求重试", "provider", provider.Name, "model", provider.Model, "attempt", attempt, "maxRetries", config.MaxRetries, "delay", retryDelay)
 			time.Sleep(retryDelay)
-			slog.Debug("重试延迟完成", "actual_delay", time.Since(sleepStart), "expected_delay", retryDelay)
 		}
 
 		// 发送HTTP请求
@@ -292,7 +313,7 @@ func (h *BaseHandler) ExecuteStreamWithRetry(
 		httpDuration := time.Since(httpStartTime)
 
 		if err != nil {
-			slog.Error("发送HTTP请求失败", "provider", provider.Name, "attempt", attempt, "duration", httpDuration, "error", err)
+			slog.Debug("发送HTTP请求失败", "provider", provider.Name, "attempt", attempt, "duration", httpDuration, "error", err)
 			lastErr = err
 			continue
 		}
@@ -305,7 +326,7 @@ func (h *BaseHandler) ExecuteStreamWithRetry(
 		attemptDuration := time.Since(attemptStartTime)
 
 		if success {
-			slog.Info("流式请求成功", "provider", provider.Name, "attempt", attempt, "total_duration", attemptDuration)
+			slog.Debug("流式请求成功", "provider", provider.Name, "attempt", attempt, "total_duration", attemptDuration)
 			return responseBuilder, tokens, nil
 		}
 
@@ -315,7 +336,7 @@ func (h *BaseHandler) ExecuteStreamWithRetry(
 			continue
 		}
 
-		slog.Error("读取流式响应失败", "provider", provider.Name, "attempt", attempt, "duration", attemptDuration, "error", err)
+		slog.Debug("读取流式响应失败", "provider", provider.Name, "attempt", attempt, "duration", attemptDuration, "error", err)
 		lastErr = err
 		continue
 	}

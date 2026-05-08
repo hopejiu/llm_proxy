@@ -3,30 +3,67 @@ let chartInstance = null;
 let hourlyChartInstance = null;
 let weeklyMode = false;
 let autoRefreshInterval = null;
+let currentChartDimension = 'tokens';
+let currentHourlyDate = '';
 
 // 存储原始统计数据，供周报模式使用
 let rawStats = { today: {}, week: {}, total: {} };
 
+// 存储每日统计数据，供趋势指标和图表维度切换使用
+let dailyStatsCache = [];
+
 // 初始化
 document.addEventListener('DOMContentLoaded', async () => {
+    // 初始化分时图表日期为今天
+    currentHourlyDate = formatDateLocal(new Date());
+    updateHourlyDateLabel();
+    
     loadStats();
     loadRecentLogs();
     loadHourlyStats();
     
-    // 先加载 ECharts，再渲染图表
     try {
-    
         loadDailyStats();
     } catch (error) {
         console.error('Failed to load ECharts:', error);
+        showToast('图表加载失败', 'error');
         document.getElementById('trendChart').innerHTML = '<div style="text-align:center;color:#94A3B8;padding:100px 0;">图表加载失败</div>';
     }
+    
+    // 点击外部关闭日期下拉
+    document.addEventListener('click', (e) => {
+        const wrap = document.querySelector('.hourly-date-dropdown-wrap');
+        if (wrap && !wrap.contains(e.target)) {
+            closeHourlyDateDropdown();
+        }
+    });
 });
+
+// 手动刷新全部数据
+async function refreshAll() {
+    const btn = document.getElementById('refreshBtn');
+    btn.classList.add('spinning');
+    
+    try {
+        await Promise.all([
+            loadStats(),
+            loadRecentLogs(),
+            loadHourlyStats(getCurrentHourlyDate()),
+            loadDailyStats()
+        ]);
+        showToast('数据已刷新', 'success');
+    } catch (error) {
+        showToast('刷新失败，请重试', 'error');
+    } finally {
+        btn.classList.remove('spinning');
+    }
+}
 
 // 加载统计数据
 async function loadStats() {
     try {
         const response = await fetch('/api/stats');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const stats = await response.json();
         
         // 保存原始数据
@@ -36,6 +73,7 @@ async function loadStats() {
         
         // 今日统计
         document.getElementById('todayTotal').textContent = formatNumber(stats.today?.total_tokens);
+        document.getElementById('todayTotalUnit').style.display = '';
         document.getElementById('todayInput').textContent = formatNumber(stats.today?.total_input_tokens);
         document.getElementById('todayOutput').textContent = formatNumber(stats.today?.total_output_tokens);
         document.getElementById('todayCached').textContent = formatNumber(stats.today?.total_cached_tokens);
@@ -44,6 +82,7 @@ async function loadStats() {
         
         // 本周统计
         document.getElementById('weekTotal').textContent = formatNumber(stats.week?.total_tokens);
+        document.getElementById('weekTotalUnit').style.display = '';
         document.getElementById('weekInput').textContent = formatNumber(stats.week?.total_input_tokens);
         document.getElementById('weekOutput').textContent = formatNumber(stats.week?.total_output_tokens);
         document.getElementById('weekCached').textContent = formatNumber(stats.week?.total_cached_tokens);
@@ -52,6 +91,7 @@ async function loadStats() {
         
         // 总计统计
         document.getElementById('totalTotal').textContent = formatNumber(stats.total?.total_tokens);
+        document.getElementById('totalTotalUnit').style.display = '';
         document.getElementById('totalInput').textContent = formatNumber(stats.total?.total_input_tokens);
         document.getElementById('totalOutput').textContent = formatNumber(stats.total?.total_output_tokens);
         document.getElementById('totalCached').textContent = formatNumber(stats.total?.total_cached_tokens);
@@ -64,6 +104,7 @@ async function loadStats() {
         }
     } catch (error) {
         console.error('Failed to load stats:', error);
+        showToast('统计数据加载失败', 'error');
     }
 }
 
@@ -71,26 +112,45 @@ async function loadStats() {
 async function loadDailyStats() {
     try {
         const response = await fetch('/api/stats/daily');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const stats = await response.json();
+        
+        // 缓存原始数据
+        dailyStatsCache = stats;
         
         // 填充数据到至少7天
         const filledStats = fillMissingDays(stats, 7);
         
         renderChart(filledStats);
-        renderTable(stats); // 表格显示原始数据
+        renderTable(stats);
+        
+        // 计算并渲染趋势指标
+        renderTrendIndicators(stats);
+        
+        // 刷新日期下拉面板
+        renderHourlyDateList();
     } catch (error) {
         console.error('Failed to load daily stats:', error);
+        showToast('每日统计加载失败', 'error');
     }
 }
 
-// 加载今日分时统计
-async function loadHourlyStats() {
+// 加载分时统计（支持指定日期，默认今日）
+async function loadHourlyStats(date) {
     try {
-        const response = await fetch('/api/stats/hourly');
+        const params = new URLSearchParams();
+        if (date) {
+            params.set('date', date);
+        }
+        const query = params.toString();
+        const url = '/api/stats/hourly' + (query ? '?' + query : '');
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const stats = await response.json();
-        renderHourlyChart(stats);
+        renderHourlyChart(stats, date);
     } catch (error) {
         console.error('Failed to load hourly stats:', error);
+        showToast('分时统计加载失败', 'error');
     }
 }
 
@@ -105,14 +165,12 @@ function formatDateLocal(date) {
 // 从日期字符串中提取 YYYY-MM-DD 部分
 function extractDateString(dateStr) {
     if (!dateStr) return '';
-    // 处理 ISO 格式 (2026-03-18T00:00:00+08:00) 或纯日期格式 (2026-03-18)
     return dateStr.split('T')[0];
 }
 
 // 填充缺失的日期（用0占位）
 function fillMissingDays(stats, minDays) {
     if (stats.length === 0) {
-        // 如果没有数据，生成最近minDays天的空数据
         const result = [];
         const today = new Date();
         for (let i = minDays - 1; i >= 0; i--) {
@@ -130,22 +188,18 @@ function fillMissingDays(stats, minDays) {
         return result;
     }
     
-    // 标准化日期格式并按日期排序（从早到晚）
     const normalizedStats = stats.map(s => ({
         ...s,
         date: extractDateString(s.date)
     }));
     const sortedStats = [...normalizedStats].sort((a, b) => new Date(a.date) - new Date(b.date));
     
-    // 获取最早和最晚日期
     const startDate = new Date(sortedStats[0].date);
     const endDate = new Date(sortedStats[sortedStats.length - 1].date);
     
-    // 计算需要填充的天数
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
-    // 如果数据不足minDays天，从今天往前补齐
     let fillStartDate = startDate;
     const daysDiff = Math.floor((today - startDate) / (1000 * 60 * 60 * 24)) + 1;
     if (daysDiff < minDays) {
@@ -153,7 +207,6 @@ function fillMissingDays(stats, minDays) {
         fillStartDate.setDate(fillStartDate.getDate() - minDays + 1);
     }
     
-    // 生成完整的日期范围
     const result = [];
     const currentDate = new Date(fillStartDate);
     const endFillDate = new Date(Math.max(today, endDate));
@@ -181,25 +234,97 @@ function fillMissingDays(stats, minDays) {
     return result;
 }
 
+// 渲染趋势指标（今日 vs 昨日，本周 vs 上周）
+function renderTrendIndicators(stats) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const todayStr = formatDateLocal(today);
+    const yesterdayDate = new Date(today);
+    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+    const yesterdayStr = formatDateLocal(yesterdayDate);
+    
+    const todayData = stats.find(s => extractDateString(s.date) === todayStr);
+    const yesterdayData = stats.find(s => extractDateString(s.date) === yesterdayStr);
+    
+    // 今日 vs 昨日
+    const todayTokens = todayData?.total_tokens || 0;
+    const yesterdayTokens = yesterdayData?.total_tokens || 0;
+    renderTrendBadge('todayTrend', todayTokens, yesterdayTokens);
+    
+    // 本周 vs 上周（本周 = 最近7天，上周 = 前7天）
+    const weekTokens = rawStats.week?.total_tokens || 0;
+    let lastWeekTokens = 0;
+    for (let i = 7; i < 14; i++) {
+        const d = new Date(today);
+        d.setDate(d.getDate() - i);
+        const dStr = formatDateLocal(d);
+        const dayData = stats.find(s => extractDateString(s.date) === dStr);
+        lastWeekTokens += dayData?.total_tokens || 0;
+    }
+    renderTrendBadge('weekTrend', weekTokens, lastWeekTokens);
+}
+
+// 渲染单个趋势徽章
+function renderTrendBadge(elementId, current, previous) {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+    
+    if (previous === 0 && current === 0) {
+        el.style.display = 'none';
+        return;
+    }
+    
+    el.style.display = '';
+    
+    if (previous === 0) {
+        el.className = 'trend-indicator trend-up';
+        el.innerHTML = '&#8593; 新增';
+        return;
+    }
+    
+    const change = ((current - previous) / previous * 100).toFixed(1);
+    const absChange = Math.abs(change);
+    
+    if (change > 0) {
+        el.className = 'trend-indicator trend-up';
+        el.innerHTML = `&#8593; ${absChange}%`;
+    } else if (change < 0) {
+        el.className = 'trend-indicator trend-down';
+        el.innerHTML = `&#8595; ${absChange}%`;
+    } else {
+        el.className = 'trend-indicator trend-neutral';
+        el.innerHTML = '&#8212; 0%';
+    }
+}
+
 // 渲染图表
 function renderChart(stats) {
     const chartDom = document.getElementById('trendChart');
     
-    // 销毁旧图表
     if (chartInstance) {
         chartInstance.dispose();
     }
     
     chartInstance = echarts.init(chartDom);
     
-    // 数据已经填充过，直接使用
     const data = stats;
     
-    // 提取日期和各类型数据
     const dates = data.map(d => {
         const date = new Date(d.date);
         return `${date.getMonth() + 1}/${date.getDate()}`;
     });
+    
+    // 根据当前维度选择数据和配置
+    if (currentChartDimension === 'requests') {
+        renderRequestChart(chartInstance, dates, data);
+    } else {
+        renderTokenChart(chartInstance, dates, data);
+    }
+}
+
+// 渲染 Token 用量图表
+function renderTokenChart(chart, dates, data) {
     const inputData = data.map(d => d.total_input_tokens || 0);
     const outputData = data.map(d => d.total_output_tokens || 0);
     const cachedData = data.map(d => d.total_cached_tokens || 0);
@@ -207,9 +332,7 @@ function renderChart(stats) {
     const option = {
         tooltip: {
             trigger: 'axis',
-            axisPointer: {
-                type: 'cross'
-            },
+            axisPointer: { type: 'cross' },
             formatter: function(params) {
                 let result = params[0].axisValue + '<br/>';
                 params.forEach(item => {
@@ -223,10 +346,7 @@ function renderChart(stats) {
             bottom: 0
         },
         grid: {
-            left: '3%',
-            right: '4%',
-            bottom: '12%',
-            top: '10%',
+            left: '3%', right: '4%', bottom: '12%', top: '10%',
             containLabel: true
         },
         xAxis: {
@@ -243,33 +363,19 @@ function renderChart(stats) {
             min: 0,
             axisLabel: {
                 formatter: function(value) {
-                    if (value >= 10000) {
-                        return (value / 10000).toFixed(0) + '万';
-                    }
+                    if (value >= 10000) return (value / 10000).toFixed(0) + '万';
                     return value;
                 }
             }
         },
         series: [
             {
-                name: 'Input',
-                type: 'line',
-                smooth: true,
-                symbol: 'circle',
-                symbolSize: 6,
-                data: inputData,
-                showSymbol: true,
-                itemStyle: {
-                    color: '#7C3AED'
-                },
-                lineStyle: {
-                    color: '#7C3AED',
-                    width: 2
-                },
+                name: 'Input', type: 'line', smooth: true,
+                symbol: 'circle', symbolSize: 6, data: inputData, showSymbol: true,
+                itemStyle: { color: '#7C3AED' },
+                lineStyle: { color: '#7C3AED', width: 2 },
                 areaStyle: {
-                    color: {
-                        type: 'linear',
-                        x: 0, y: 0, x2: 0, y2: 1,
+                    color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
                         colorStops: [
                             { offset: 0, color: 'rgba(124, 58, 237, 0.3)' },
                             { offset: 1, color: 'rgba(124, 58, 237, 0.05)' }
@@ -278,24 +384,12 @@ function renderChart(stats) {
                 }
             },
             {
-                name: 'Output',
-                type: 'line',
-                smooth: true,
-                symbol: 'circle',
-                symbolSize: 6,
-                data: outputData,
-                showSymbol: true,
-                itemStyle: {
-                    color: '#A78BFA'
-                },
-                lineStyle: {
-                    color: '#A78BFA',
-                    width: 2
-                },
+                name: 'Output', type: 'line', smooth: true,
+                symbol: 'circle', symbolSize: 6, data: outputData, showSymbol: true,
+                itemStyle: { color: '#A78BFA' },
+                lineStyle: { color: '#A78BFA', width: 2 },
                 areaStyle: {
-                    color: {
-                        type: 'linear',
-                        x: 0, y: 0, x2: 0, y2: 1,
+                    color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
                         colorStops: [
                             { offset: 0, color: 'rgba(167, 139, 250, 0.3)' },
                             { offset: 1, color: 'rgba(167, 139, 250, 0.05)' }
@@ -304,24 +398,12 @@ function renderChart(stats) {
                 }
             },
             {
-                name: 'Cached',
-                type: 'line',
-                smooth: true,
-                symbol: 'circle',
-                symbolSize: 6,
-                data: cachedData,
-                showSymbol: true,
-                itemStyle: {
-                    color: '#10B981'
-                },
-                lineStyle: {
-                    color: '#10B981',
-                    width: 2
-                },
+                name: 'Cached', type: 'line', smooth: true,
+                symbol: 'circle', symbolSize: 6, data: cachedData, showSymbol: true,
+                itemStyle: { color: '#10B981' },
+                lineStyle: { color: '#10B981', width: 2 },
                 areaStyle: {
-                    color: {
-                        type: 'linear',
-                        x: 0, y: 0, x2: 0, y2: 1,
+                    color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
                         colorStops: [
                             { offset: 0, color: 'rgba(16, 185, 129, 0.3)' },
                             { offset: 1, color: 'rgba(16, 185, 129, 0.05)' }
@@ -332,26 +414,107 @@ function renderChart(stats) {
         ]
     };
     
-    chartInstance.setOption(option);
+    chart.setOption(option);
 }
 
-// 渲染今日分时图表
-function renderHourlyChart(stats) {
+// 渲染请求数图表
+function renderRequestChart(chart, dates, data) {
+    const requestData = data.map(d => d.request_count || 0);
+    
+    const option = {
+        tooltip: {
+            trigger: 'axis',
+            axisPointer: { type: 'cross' },
+            formatter: function(params) {
+                let result = params[0].axisValue + '<br/>';
+                params.forEach(item => {
+                    result += `${item.marker} ${item.seriesName}: ${item.value.toLocaleString()}<br/>`;
+                });
+                return result;
+            }
+        },
+        legend: {
+            data: ['请求数'],
+            bottom: 0
+        },
+        grid: {
+            left: '3%', right: '4%', bottom: '12%', top: '10%',
+            containLabel: true
+        },
+        xAxis: {
+            type: 'category',
+            boundaryGap: false,
+            data: dates,
+            axisLabel: {
+                interval: Math.floor(dates.length / 7),
+                rotate: 0
+            }
+        },
+        yAxis: {
+            type: 'value',
+            min: 0,
+            axisLabel: {
+                formatter: function(value) {
+                    if (value >= 1000) return (value / 1000).toFixed(0) + 'k';
+                    return value;
+                }
+            }
+        },
+        series: [
+            {
+                name: '请求数', type: 'bar',
+                data: requestData,
+                itemStyle: {
+                    color: {
+                        type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+                        colorStops: [
+                            { offset: 0, color: '#7C3AED' },
+                            { offset: 1, color: '#A78BFA' }
+                        ]
+                    },
+                    borderRadius: [4, 4, 0, 0]
+                }
+            }
+        ]
+    };
+    
+    chart.setOption(option);
+}
+
+// 切换图表维度
+function switchChartDimension(dimension, btn) {
+    currentChartDimension = dimension;
+    
+    // 更新 Tab 样式
+    document.querySelectorAll('.chart-tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    
+    // 重新渲染图表
+    const filledStats = fillMissingDays(dailyStatsCache, 7);
+    renderChart(filledStats);
+}
+
+// 渲染分时图表（date 参数用于判断是否截断到当前小时）
+function renderHourlyChart(stats, date) {
     const chartDom = document.getElementById('hourlyChart');
     
-    // 销毁旧图表
     if (hourlyChartInstance) {
         hourlyChartInstance.dispose();
     }
     
     hourlyChartInstance = echarts.init(chartDom);
     
-    // 生成24小时的数据，填充缺失的小时
+    // 判断是否为今日：今日只显示到当前小时，历史日期显示全天
+    const todayStr = formatDateLocal(new Date());
+    const isToday = !date || date === todayStr;
+    const currentHour = new Date().getHours();
+    const maxHour = isToday ? Math.min(currentHour, 23) : 23;
+    
     const hourData = [];
     const tokenData = [];
     const requestData = [];
     
-    for (let i = 0; i < 24; i++) {
+    for (let i = 0; i <= maxHour; i++) {
         const hourStat = stats.find(s => s.hour === i);
         hourData.push(`${i}:00`);
         tokenData.push(hourStat ? hourStat.total_tokens : 0);
@@ -361,9 +524,7 @@ function renderHourlyChart(stats) {
     const option = {
         tooltip: {
             trigger: 'axis',
-            axisPointer: {
-                type: 'shadow'
-            },
+            axisPointer: { type: 'shadow' },
             formatter: function(params) {
                 let result = params[0].axisValue + '<br/>';
                 params.forEach(item => {
@@ -377,17 +538,14 @@ function renderHourlyChart(stats) {
             bottom: 0
         },
         grid: {
-            left: '3%',
-            right: '4%',
-            bottom: '12%',
-            top: '10%',
+            left: '3%', right: '4%', bottom: '12%', top: '10%',
             containLabel: true
         },
         xAxis: {
             type: 'category',
             data: hourData,
             axisLabel: {
-                interval: 2
+                interval: Math.max(1, Math.floor(hourData.length / 8))
             }
         },
         yAxis: [
@@ -397,9 +555,7 @@ function renderHourlyChart(stats) {
                 position: 'left',
                 axisLabel: {
                     formatter: function(value) {
-                        if (value >= 10000) {
-                            return (value / 10000).toFixed(0) + '万';
-                        }
+                        if (value >= 10000) return (value / 10000).toFixed(0) + '万';
                         return value;
                     }
                 }
@@ -410,9 +566,7 @@ function renderHourlyChart(stats) {
                 position: 'right',
                 axisLabel: {
                     formatter: function(value) {
-                        if (value >= 1000) {
-                            return (value / 1000).toFixed(0) + 'k';
-                        }
+                        if (value >= 1000) return (value / 1000).toFixed(0) + 'k';
                         return value;
                     }
                 }
@@ -426,8 +580,7 @@ function renderHourlyChart(stats) {
                 data: tokenData,
                 itemStyle: {
                     color: {
-                        type: 'linear',
-                        x: 0, y: 0, x2: 0, y2: 1,
+                        type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
                         colorStops: [
                             { offset: 0, color: '#7C3AED' },
                             { offset: 1, color: '#A78BFA' }
@@ -444,13 +597,8 @@ function renderHourlyChart(stats) {
                 smooth: true,
                 symbol: 'circle',
                 symbolSize: 6,
-                itemStyle: {
-                    color: '#F59E0B'
-                },
-                lineStyle: {
-                    color: '#F59E0B',
-                    width: 2
-                }
+                itemStyle: { color: '#F59E0B' },
+                lineStyle: { color: '#F59E0B', width: 2 }
             }
         ]
     };
@@ -463,7 +611,14 @@ function renderTable(stats) {
     const tbody = document.getElementById('statsTableBody');
     
     if (stats.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-gray-500 py-8">暂无数据</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="6">
+            <div class="empty-state">
+                <svg class="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                </svg>
+                <p>暂无数据，开始使用后将自动记录</p>
+            </div>
+        </td></tr>`;
         return;
     }
     
@@ -483,10 +638,12 @@ function renderTable(stats) {
 async function loadRecentLogs() {
     try {
         const response = await fetch('/api/logs/recent?limit=20');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const logs = await response.json();
         renderLogs(logs);
     } catch (error) {
         console.error('Failed to load recent logs:', error);
+        showToast('请求日志加载失败', 'error');
     }
 }
 
@@ -495,7 +652,14 @@ function renderLogs(logs) {
     const tbody = document.getElementById('recentLogsBody');
     
     if (logs.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="11" class="text-center text-gray-500 py-8">暂无请求记录</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="11">
+            <div class="empty-state">
+                <svg class="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                </svg>
+                <p>暂无请求记录，发起请求后将自动记录</p>
+            </div>
+        </td></tr>`;
         return;
     }
     
@@ -529,7 +693,6 @@ function renderLogs(logs) {
 function formatNumber(num) {
     if (num === undefined || num === null || num === 0) return '0';
     
-    // 中国习惯：万单位
     if (num >= 10000) {
         const wan = (num / 10000).toFixed(1);
         return `${wan}万 (${num.toLocaleString()})`;
@@ -578,6 +741,55 @@ async function showLogDetail(id) {
         }
         const log = await response.json();
         
+        // 渲染元信息
+        const tokensPerSecond = log.duration > 0 ? (log.output_tokens * 1000 / log.duration).toFixed(1) : '-';
+        const durationSeconds = log.duration > 0 ? (log.duration / 1000).toFixed(1) + 's' : '-';
+        
+        document.getElementById('logMetaGrid').innerHTML = `
+            <div class="log-meta-item">
+                <span class="log-meta-label">时间</span>
+                <span class="log-meta-value">${formatTime(log.created_at)}</span>
+            </div>
+            <div class="log-meta-item">
+                <span class="log-meta-label">模型</span>
+                <span class="log-meta-value">${escapeHtml(log.model) || '-'}</span>
+            </div>
+            <div class="log-meta-item">
+                <span class="log-meta-label">Provider</span>
+                <span class="log-meta-value">${log.provider ? escapeHtml(log.provider.name) : '-'}</span>
+            </div>
+            <div class="log-meta-item">
+                <span class="log-meta-label">耗时</span>
+                <span class="log-meta-value">${durationSeconds}</span>
+            </div>
+            <div class="log-meta-item">
+                <span class="log-meta-label">Token/s</span>
+                <span class="log-meta-value">${tokensPerSecond}</span>
+            </div>
+            <div class="log-meta-item">
+                <span class="log-meta-label">状态</span>
+                <span class="log-meta-value">${log.status === 'success' 
+                    ? '<span class="tag tag-success">成功</span>' 
+                    : '<span class="tag tag-error">失败</span>'}</span>
+            </div>
+            <div class="log-meta-item">
+                <span class="log-meta-label">Input</span>
+                <span class="log-meta-value">${formatNumber(log.input_tokens)}</span>
+            </div>
+            <div class="log-meta-item">
+                <span class="log-meta-label">Output</span>
+                <span class="log-meta-value">${formatNumber(log.output_tokens)}</span>
+            </div>
+            <div class="log-meta-item">
+                <span class="log-meta-label">Cached</span>
+                <span class="log-meta-value" style="color:#059669;">${formatNumber(log.cached_tokens)}</span>
+            </div>
+            <div class="log-meta-item">
+                <span class="log-meta-label">Total</span>
+                <span class="log-meta-value" style="color:#7C3AED;">${formatNumber(log.total_tokens)}</span>
+            </div>
+        `;
+        
         // 格式化JSON
         let requestJson = log.request_body || '';
         let responseContent = log.response_content || '';
@@ -616,10 +828,14 @@ function copyToClipboard(elementId) {
 // 周报模式切换
 function toggleWeeklyMode() {
     weeklyMode = document.getElementById('weeklyModeSwitch').checked;
+    const warningEl = document.getElementById('weeklyModeWarning');
+    
     if (weeklyMode) {
         applyWeeklyMode();
+        warningEl.classList.add('visible');
     } else {
         restoreNormalMode();
+        warningEl.classList.remove('visible');
     }
 }
 
@@ -632,15 +848,13 @@ function applyWeeklyMode() {
     ];
     
     pairs.forEach(pair => {
-        // 从 rawStats 获取 input 值，若为空则从 DOM 文本解析
         let inputVal = rawStats[pair.inputEl.replace('Input', '')]?.total_input_tokens;
         if (!inputVal) {
-            // 从 DOM 显示的文本中解析数字
             const text = document.getElementById(pair.inputEl).textContent;
             inputVal = parseFormattedNumber(text);
         }
         
-        const factor = 0.85 + Math.random() * 0.05; // 0.85 ~ 0.90
+        const factor = 0.85 + Math.random() * 0.05;
         const cachedValue = Math.round(inputVal * factor);
         document.getElementById(pair.cachedInputEl).textContent = formatNumber(cachedValue);
         document.getElementById(pair.cachedTextEl).classList.add('hidden');
@@ -651,12 +865,10 @@ function applyWeeklyMode() {
 // 从 formatNumber 格式化的文本中解析出原始数字
 function parseFormattedNumber(text) {
     if (!text) return 0;
-    // 处理 "1.2万 (12,000)" 格式
     const wanMatch = text.match(/([\d.]+)\s*万/);
     if (wanMatch) {
         return Math.round(parseFloat(wanMatch[1]) * 10000);
     }
-    // 处理带逗号的数字 "12,000"
     const cleaned = text.replace(/,/g, '').trim();
     const num = parseInt(cleaned, 10);
     return isNaN(num) ? 0 : num;
@@ -683,19 +895,142 @@ function toggleAutoRefresh() {
     const enabled = document.getElementById('autoRefreshSwitch').checked;
     
     if (enabled) {
-        // 开启自动刷新，每10秒刷新一次
         autoRefreshInterval = setInterval(() => {
             loadStats();
             loadRecentLogs();
-            loadHourlyStats();
+            loadHourlyStats(getCurrentHourlyDate());
         }, 10000);
         showToast('已开启自动刷新（每10秒）', 'success');
     } else {
-        // 关闭自动刷新
         if (autoRefreshInterval) {
             clearInterval(autoRefreshInterval);
             autoRefreshInterval = null;
         }
         showToast('已关闭自动刷新', 'success');
     }
+}
+
+// 获取当前分时图表选中的日期
+function getCurrentHourlyDate() {
+    return currentHourlyDate || formatDateLocal(new Date());
+}
+
+// 更新日期触发按钮的显示文本
+function updateHourlyDateLabel() {
+    const label = document.getElementById('hourlyDateLabel');
+    if (!label) return;
+    const todayStr = formatDateLocal(new Date());
+    if (!currentHourlyDate || currentHourlyDate === todayStr) {
+        label.textContent = '今天';
+    } else {
+        // 显示为 M/D 格式
+        const d = new Date(currentHourlyDate + 'T00:00:00');
+        label.textContent = `${d.getMonth() + 1}/${d.getDate()}`;
+    }
+}
+
+// 切换日期下拉面板
+function toggleHourlyDateDropdown() {
+    const dropdown = document.getElementById('hourlyDateDropdown');
+    if (!dropdown) return;
+    const isOpen = dropdown.classList.contains('open');
+    if (isOpen) {
+        closeHourlyDateDropdown();
+    } else {
+        renderHourlyDateList();
+        dropdown.classList.add('open');
+    }
+}
+
+// 关闭日期下拉面板
+function closeHourlyDateDropdown() {
+    const dropdown = document.getElementById('hourlyDateDropdown');
+    if (dropdown) dropdown.classList.remove('open');
+}
+
+// 渲染日期下拉列表（从 dailyStatsCache 提取最近30天数据）
+function renderHourlyDateList() {
+    const listEl = document.getElementById('hourlyDateList');
+    if (!listEl) return;
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayStr = formatDateLocal(today);
+    
+    // 构建日期 -> 消耗量映射
+    const dailyMap = {};
+    for (const s of dailyStatsCache) {
+        const dateStr = extractDateString(s.date);
+        dailyMap[dateStr] = s.total_tokens || 0;
+    }
+    
+    // 生成最近30天列表（从今天往前）
+    const items = [];
+    for (let i = 0; i < 30; i++) {
+        const d = new Date(today);
+        d.setDate(d.getDate() - i);
+        const dateStr = formatDateLocal(d);
+        const tokens = dailyMap[dateStr] || 0;
+        const weekday = ['日', '一', '二', '三', '四', '五', '六'][d.getDay()];
+        const isToday = dateStr === todayStr;
+        items.push({ dateStr, tokens, weekday, isToday, date: d });
+    }
+    
+    // 找出最大消耗量（用于热力条宽度比例）
+    const maxTokens = Math.max(...items.map(it => it.tokens), 1);
+    
+    listEl.innerHTML = items.map(item => {
+        const isActive = item.dateStr === currentHourlyDate;
+        const barWidth = item.tokens > 0 ? Math.max(4, (item.tokens / maxTokens) * 100) : 0;
+        const label = item.isToday ? '今天' : `${item.date.getMonth() + 1}/${item.date.getDate()} 周${item.weekday}`;
+        const tokenDisplay = item.tokens > 0 ? formatCompactNumber(item.tokens) : '-';
+        return `
+            <div class="hourly-date-item${isActive ? ' active' : ''}" onclick="selectHourlyDate('${item.dateStr}')">
+                <span class="hourly-date-item-label">${label}</span>
+                <div class="hourly-date-item-bar-wrap">
+                    <div class="hourly-date-item-bar" style="width:${barWidth}%"></div>
+                </div>
+                <span class="hourly-date-item-value">${tokenDisplay}</span>
+            </div>
+        `;
+    }).join('');
+}
+
+// 选择日期
+function selectHourlyDate(dateStr) {
+    currentHourlyDate = dateStr;
+    updateHourlyDateLabel();
+    closeHourlyDateDropdown();
+    loadHourlyStats(dateStr);
+}
+
+// 前后切换日期
+function changeHourlyDate(offset) {
+    let currentDate;
+    if (currentHourlyDate) {
+        currentDate = new Date(currentHourlyDate + 'T00:00:00');
+    } else {
+        currentDate = new Date();
+    }
+    currentDate.setDate(currentDate.getDate() + offset);
+    const newDate = formatDateLocal(currentDate);
+    currentHourlyDate = newDate;
+    updateHourlyDateLabel();
+    loadHourlyStats(newDate);
+}
+
+// 跳转到今天
+function goToTodayHourly() {
+    const today = formatDateLocal(new Date());
+    currentHourlyDate = today;
+    updateHourlyDateLabel();
+    loadHourlyStats(today);
+}
+
+// 紧凑数字格式（用于下拉列表中的消耗量显示）
+function formatCompactNumber(num) {
+    if (num >= 10000) {
+        return (num / 10000).toFixed(1) + '万';
+    }
+    return num.toLocaleString();
 }

@@ -30,6 +30,9 @@ type Config struct {
 	// 缓存与清理
 	ProviderCacheTTL time.Duration // Provider 缓存 TTL
 	LogCleanupDays   int           // 日志清理天数
+
+	// 日志
+	LogLevel string // 日志级别: debug, info, warn, error
 }
 
 func Load() *Config {
@@ -53,6 +56,7 @@ func Load() *Config {
 		RetryDelayBase:         getEnvDuration("RETRY_DELAY_BASE", 500*time.Millisecond),
 		ProviderCacheTTL:       getEnvDuration("PROVIDER_CACHE_TTL", 30*time.Second),
 		LogCleanupDays:         getEnvInt("LOG_CLEANUP_DAYS", 14),
+		LogLevel:               getEnv("LOG_LEVEL", "info"),
 	}
 
 	cfg.validate()
@@ -91,7 +95,7 @@ func validatePort(port string, name string) error {
 }
 
 func (c *Config) DSN() string {
-	return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+	return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&interpolateParams=true&timeout=5s",
 		c.DBUser, c.DBPassword, c.DBHost, c.DBPort, c.DBName)
 }
 
@@ -100,9 +104,14 @@ func (c *Config) IsSQLite() bool {
 	return c.DBType == "sqlite"
 }
 
-// SQLiteDSN 返回SQLite的DSN
-func (c *Config) SQLiteDSN() string {
+// SQLitePath 返回SQLite数据库文件路径（用于 os.Stat 等文件操作）
+func (c *Config) SQLitePath() string {
 	return c.DBPath
+}
+
+// SQLiteDSN 返回SQLite的DSN（含PRAGMA优化参数）
+func (c *Config) SQLiteDSN() string {
+	return c.DBPath + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_pragma=cache_size(-64000)"
 }
 
 func getEnv(key, defaultValue string) string {

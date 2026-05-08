@@ -7,6 +7,7 @@ import (
 	"llm-proxy/internal/model"
 	"llm-proxy/internal/repository"
 	"llm-proxy/internal/service"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -29,9 +30,13 @@ func NewOllamaHandler(proxyService *service.ProxyService, requestLogRepo *reposi
 // Chat 处理 /api/chat 请求
 func (h *OllamaHandler) Chat(c *gin.Context) {
 	startTime := time.Now()
+	// 注入 requestID 到 context
+	ctx := contextWithRequestID(c.Request.Context(), generateRequestID())
+	c.Request = c.Request.WithContext(ctx)
 
 	body, err := h.ReadBody(c)
 	if err != nil {
+		slog.Error("ollama request", "requestID", requestIDFromContext(ctx), "status", "ERROR", "error", err.Error())
 		c.JSON(http.StatusBadRequest, model.OllamaChatResponse{
 			Model:      "",
 			CreatedAt:  time.Now().Format(time.RFC3339),
@@ -44,6 +49,7 @@ func (h *OllamaHandler) Chat(c *gin.Context) {
 
 	var ollamaReq model.OllamaChatRequest
 	if err := json.Unmarshal(body, &ollamaReq); err != nil {
+		slog.Error("ollama request", "requestID", requestIDFromContext(ctx), "status", "ERROR", "error", "invalid request body")
 		c.JSON(http.StatusBadRequest, model.OllamaChatResponse{
 			Model:      "",
 			CreatedAt:  time.Now().Format(time.RFC3339),
@@ -63,8 +69,11 @@ func (h *OllamaHandler) Chat(c *gin.Context) {
 
 // handleNonStreamChat 处理非流式聊天请求
 func (h *OllamaHandler) handleNonStreamChat(c *gin.Context, ollamaReq *model.OllamaChatRequest, startTime time.Time) {
+	requestID := requestIDFromContext(c.Request.Context())
+
 	provider, err := h.GetProviderByModel(ollamaReq.Model)
 	if err != nil {
+		slog.Error("ollama request", "requestID", requestID, "model", ollamaReq.Model, "status", "FAILED", "error", err.Error())
 		c.JSON(http.StatusInternalServerError, model.OllamaChatResponse{
 			Model:      ollamaReq.Model,
 			CreatedAt:  time.Now().Format(time.RFC3339),
@@ -84,11 +93,14 @@ func (h *OllamaHandler) handleNonStreamChat(c *gin.Context, ollamaReq *model.Oll
 
 	respBody, err := h.SendRequest(ctx, provider.GetRequestURL(), openAIBody, provider.APIKey)
 	if err != nil {
-		statusCode := http.StatusInternalServerError
 		errMsg := err.Error()
 		if upErr, ok := err.(*UpstreamError); ok {
-			statusCode = upErr.StatusCode
 			errMsg = upErr.Body
+		}
+		slog.Error("ollama request", "requestID", requestID, "provider", provider.Name, "model", provider.Model, "status", "FAILED", "duration_ms", time.Since(startTime).Milliseconds(), "error", errMsg)
+		statusCode := http.StatusInternalServerError
+		if upErr, ok := err.(*UpstreamError); ok {
+			statusCode = upErr.StatusCode
 		}
 		c.JSON(statusCode, model.OllamaChatResponse{
 			Model:      provider.Model,
@@ -127,18 +139,21 @@ func (h *OllamaHandler) handleNonStreamChat(c *gin.Context, ollamaReq *model.Oll
 		Duration:        time.Since(startTime).Milliseconds(),
 	}
 	h.SaveRequestLog(reqLog)
+	slog.Info("ollama request", "requestID", requestID, "provider", provider.Name, "model", provider.Model, "status", "SUCCESS", "duration_ms", time.Since(startTime).Milliseconds())
 
 	c.JSON(http.StatusOK, ollamaResp)
 }
 
 // handleStreamChat 处理流式聊天请求（支持超时重试）
 func (h *OllamaHandler) handleStreamChat(c *gin.Context, ollamaReq *model.OllamaChatRequest, startTime time.Time) {
+	requestID := requestIDFromContext(c.Request.Context())
 	c.Header("Content-Type", "application/x-ndjson")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 
 	provider, err := h.GetProviderByModel(ollamaReq.Model)
 	if err != nil {
+		slog.Error("ollama request", "requestID", requestID, "model", ollamaReq.Model, "status", "FAILED", "error", err.Error())
 		h.sendOllamaStreamError(c, err.Error())
 		return
 	}
@@ -180,6 +195,7 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, ollamaReq *model.Ollama
 	)
 
 	if lastErr != nil {
+		slog.Error("ollama request", "requestID", requestID, "provider", provider.Name, "model", provider.Model, "status", "FAILED", "duration_ms", time.Since(startTime).Milliseconds(), "error", lastErr.Error())
 		h.sendOllamaStreamError(c, lastErr.Error())
 		return
 	}
@@ -212,6 +228,7 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, ollamaReq *model.Ollama
 		Duration:        time.Since(startTime).Milliseconds(),
 	}
 	h.SaveRequestLog(reqLog)
+	slog.Info("ollama request", "requestID", requestID, "provider", provider.Name, "model", provider.Model, "status", "STREAM_END", "duration_ms", time.Since(startTime).Milliseconds())
 }
 
 // Tags 处理 /api/tags 请求

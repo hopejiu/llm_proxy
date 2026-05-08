@@ -69,22 +69,23 @@ func (p *ProviderConfig) GetRequestURL() string {
 
 // RequestLog 请求日志记录
 type RequestLog struct {
-	ID              uint      `json:"id" gorm:"primaryKey"`
-	ProviderID      uint      `json:"provider_id"`
+	ID              uint           `json:"id" gorm:"primaryKey"`
+	ProviderID      uint           `json:"provider_id" gorm:"index:idx_provider_id"`
 	Provider        ProviderConfig `json:"provider" gorm:"-"` // 不再使用外键关联，手动处理
-	Model           string    `json:"model" gorm:"size:100"`
-	InputTokens     int       `json:"input_tokens"`
-	OutputTokens    int       `json:"output_tokens"`
-	TotalTokens     int       `json:"total_tokens"`
-	CachedTokens    int       `json:"cached_tokens"`                                                    // 缓存token数
-	RequestBody     string    `json:"request_body" gorm:"type:longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"`     // 完整请求JSON
-	ResponseBody    string    `json:"response_body" gorm:"type:longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"`    // 完整响应JSON
-	ResponseContent string    `json:"response_content" gorm:"type:longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"` // 解析后的可读响应内容（stream类型拼接后的完整内容）
-	ThinkingContent string    `json:"thinking_content" gorm:"type:longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"` // 推理/thinking内容
-	Status          string    `json:"status" gorm:"size:20"`                 // success/error
-	ErrorMessage    string    `json:"error_message" gorm:"size:1000"`
-	Duration        int64     `json:"duration"` // 请求耗时(毫秒)
-	CreatedAt       time.Time `json:"created_at"`
+	Model           string         `json:"model" gorm:"size:100"`
+	InputTokens     int            `json:"input_tokens"`
+	OutputTokens    int            `json:"output_tokens"`
+	TotalTokens     int            `json:"total_tokens"`
+	CachedTokens    int            `json:"cached_tokens"`                // 缓存token数
+	RequestBody     string         `json:"request_body" gorm:"type:longtext"`     // 完整请求JSON
+	ResponseBody    string         `json:"response_body" gorm:"type:longtext"`    // 完整响应JSON
+	ResponseContent string         `json:"response_content" gorm:"type:longtext"` // 解析后的可读响应内容（stream类型拼接后的完整内容）
+	ThinkingContent string         `json:"thinking_content" gorm:"type:longtext"` // 推理/thinking内容
+	Status          string         `json:"status" gorm:"size:20;index:idx_created_at_status"` // success/error
+	ErrorMessage    string         `json:"error_message" gorm:"size:1000"`
+	Duration        int64          `json:"duration"` // 请求耗时(毫秒)
+	Aggregated      bool           `json:"aggregated" gorm:"default:false;index:idx_aggregated"` // 是否已汇总到hourly_stats
+	CreatedAt       time.Time      `json:"created_at" gorm:"index:idx_created_at;index:idx_created_at_status"`
 }
 
 // TokenStats Token使用统计
@@ -95,4 +96,18 @@ type TokenStats struct {
 	TotalTokens       int64  `json:"total_tokens" gorm:"column:total_tokens"`
 	TotalCachedTokens int64  `json:"total_cached_tokens" gorm:"column:total_cached_tokens"`
 	RequestCount      int64  `json:"request_count" gorm:"column:request_count"`
+}
+
+// HourlyStat 每小时汇总统计（仅统计成功请求）
+type HourlyStat struct {
+	ID            uint      `json:"id" gorm:"primaryKey"`
+	Hour          time.Time `json:"hour" gorm:"uniqueIndex;not null"` // 小时起始时间，唯一索引
+	InputTokens   int64     `json:"input_tokens"`
+	OutputTokens  int64     `json:"output_tokens"`
+	TotalTokens   int64     `json:"total_tokens"`
+	CachedTokens  int64     `json:"cached_tokens"`
+	RequestCount  int64     `json:"request_count"`  // 成功请求数
+	TotalDuration int64     `json:"total_duration"` // 总耗时(ms)，用于计算平均耗时
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }

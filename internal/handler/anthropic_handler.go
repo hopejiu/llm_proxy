@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"llm-proxy/internal/converter"
 	"llm-proxy/internal/model"
@@ -31,9 +32,13 @@ func NewAnthropicHandler(proxyService *service.ProxyService, requestLogRepo *rep
 // Messages 处理 /anthropic/v1/messages 请求
 func (h *AnthropicHandler) Messages(c *gin.Context) {
 	startTime := time.Now()
+	// 注入 requestID 到 context
+	ctx := contextWithRequestID(c.Request.Context(), generateRequestID())
+	c.Request = c.Request.WithContext(ctx)
 
 	body, err := h.ReadBody(c)
 	if err != nil {
+		slog.Error("anthropic request", "requestID", requestIDFromContext(ctx), "status", "ERROR", "error", err.Error())
 		c.JSON(http.StatusBadRequest, gin.H{
 			"type":  "error",
 			"error": gin.H{"type": "invalid_request_error", "message": err.Error()},
@@ -43,6 +48,7 @@ func (h *AnthropicHandler) Messages(c *gin.Context) {
 
 	var anthropicReq model.AnthropicMessagesRequest
 	if err := json.Unmarshal(body, &anthropicReq); err != nil {
+		slog.Error("anthropic request", "requestID", requestIDFromContext(ctx), "status", "ERROR", "error", "invalid request body")
 		c.JSON(http.StatusBadRequest, gin.H{
 			"type":  "error",
 			"error": gin.H{"type": "invalid_request_error", "message": "invalid request body"},
@@ -52,6 +58,7 @@ func (h *AnthropicHandler) Messages(c *gin.Context) {
 
 	provider, err := h.GetProviderByModel(anthropicReq.Model)
 	if err != nil {
+		slog.Error("anthropic request", "requestID", requestIDFromContext(ctx), "model", anthropicReq.Model, "status", "FAILED", "error", err.Error())
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"type":  "error",
 			"error": gin.H{"type": "api_error", "message": err.Error()},
@@ -59,16 +66,18 @@ func (h *AnthropicHandler) Messages(c *gin.Context) {
 		return
 	}
 
+	requestID := requestIDFromContext(ctx)
+
 	// 根据 Provider 类型选择处理方式
 	if anthropicReq.Stream {
-		h.handleStreamMessages(c, &anthropicReq, provider, startTime)
+		h.handleStreamMessages(c, &anthropicReq, provider, startTime, requestID)
 	} else {
-		h.handleNonStreamMessages(c, &anthropicReq, provider, startTime)
+		h.handleNonStreamMessages(c, &anthropicReq, provider, startTime, requestID)
 	}
 }
 
 // handleNonStreamMessages 处理非流式请求（协议转换）
-func (h *AnthropicHandler) handleNonStreamMessages(c *gin.Context, anthropicReq *model.AnthropicMessagesRequest, provider *model.ProviderConfig, startTime time.Time) {
+func (h *AnthropicHandler) handleNonStreamMessages(c *gin.Context, anthropicReq *model.AnthropicMessagesRequest, provider *model.ProviderConfig, startTime time.Time, requestID string) {
 	openAIReq := converter.AnthropicToOpenAI(anthropicReq, provider.Model)
 	openAIBody, _ := json.Marshal(openAIReq)
 	openAIBody = h.PrepareRequestBody(openAIBody, provider)
@@ -78,11 +87,14 @@ func (h *AnthropicHandler) handleNonStreamMessages(c *gin.Context, anthropicReq 
 
 	respBody, err := h.SendRequest(ctx, provider.GetRequestURL(), openAIBody, provider.APIKey)
 	if err != nil {
-		statusCode := http.StatusInternalServerError
 		errMsg := err.Error()
 		if upErr, ok := err.(*UpstreamError); ok {
-			statusCode = upErr.StatusCode
 			errMsg = upErr.Body
+		}
+		slog.Error("anthropic request", "requestID", requestID, "provider", provider.Name, "model", provider.Model, "status", "FAILED", "duration_ms", time.Since(startTime).Milliseconds(), "error", errMsg)
+		statusCode := http.StatusInternalServerError
+		if upErr, ok := err.(*UpstreamError); ok {
+			statusCode = upErr.StatusCode
 		}
 		c.JSON(statusCode, gin.H{
 			"type":  "error",
@@ -123,12 +135,13 @@ func (h *AnthropicHandler) handleNonStreamMessages(c *gin.Context, anthropicReq 
 		Duration:        time.Since(startTime).Milliseconds(),
 	}
 	h.SaveRequestLog(reqLog)
+	slog.Info("anthropic request", "requestID", requestID, "provider", provider.Name, "model", provider.Model, "status", "SUCCESS", "duration_ms", time.Since(startTime).Milliseconds())
 
 	c.JSON(http.StatusOK, anthropicResp)
 }
 
 // handleStreamMessages 处理流式请求（OpenAI 类型 Provider，需要协议转换）
-func (h *AnthropicHandler) handleStreamMessages(c *gin.Context, anthropicReq *model.AnthropicMessagesRequest, provider *model.ProviderConfig, startTime time.Time) {
+func (h *AnthropicHandler) handleStreamMessages(c *gin.Context, anthropicReq *model.AnthropicMessagesRequest, provider *model.ProviderConfig, startTime time.Time, requestID string) {
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
@@ -385,6 +398,7 @@ func (h *AnthropicHandler) handleStreamMessages(c *gin.Context, anthropicReq *mo
 	)
 
 	if lastErr != nil {
+		slog.Error("anthropic request", "requestID", requestID, "provider", provider.Name, "model", provider.Model, "status", "FAILED", "duration_ms", time.Since(startTime).Milliseconds(), "error", lastErr.Error())
 		h.sendAnthropicSSEError(c, lastErr.Error())
 		return
 	}
@@ -432,6 +446,7 @@ func (h *AnthropicHandler) handleStreamMessages(c *gin.Context, anthropicReq *mo
 		Duration:        time.Since(startTime).Milliseconds(),
 	}
 	h.SaveRequestLog(reqLog)
+	slog.Info("anthropic request", "requestID", requestID, "provider", provider.Name, "model", provider.Model, "status", "STREAM_END", "duration_ms", time.Since(startTime).Milliseconds())
 }
 
 // Models 处理 /anthropic/v1/models 请求

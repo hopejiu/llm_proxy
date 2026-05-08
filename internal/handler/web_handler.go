@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -237,11 +238,33 @@ func (h *WebHandler) GetLogDetail(c *gin.Context) {
 	respondOK(c, logDetail)
 }
 
-// GetTodayHourlyStats 获取今日分时统计
+// GetTodayHourlyStats 获取分时统计（支持 date 查询参数指定日期，默认今日）
 func (h *WebHandler) GetTodayHourlyStats(c *gin.Context) {
-	stats, err := h.statsService.GetTodayHourlyStats()
+	dateStr := c.Query("date")
+
+	if dateStr == "" {
+		// 默认今日
+		stats, err := h.statsService.GetTodayHourlyStats()
+		if err != nil {
+			slog.Error("获取今日分时统计失败", "error", err)
+			respondError(c, http.StatusInternalServerError, ErrInternal, "获取分时统计失败")
+			return
+		}
+		respondOK(c, stats)
+		return
+	}
+
+	// 解析日期参数
+	date, err := time.Parse("2006-01-02", dateStr)
 	if err != nil {
-		slog.Error("获取今日分时统计失败", "error", err)
+		slog.Error("解析日期参数失败", "date", dateStr, "error", err)
+		respondError(c, http.StatusBadRequest, ErrBadRequest, "日期格式错误，应为 YYYY-MM-DD")
+		return
+	}
+
+	stats, err := h.statsService.GetHourlyStatsByDate(date)
+	if err != nil {
+		slog.Error("获取指定日期分时统计失败", "date", dateStr, "error", err)
 		respondError(c, http.StatusInternalServerError, ErrInternal, "获取分时统计失败")
 		return
 	}
