@@ -173,6 +173,17 @@ function renderRecentLogs(logs) {
         const successCount = logs.filter(l => l.status === 'success').length;
         const rate = ((successCount / logs.length) * 100).toFixed(0);
         document.getElementById('successRate').textContent = rate + '%';
+
+        // 计算 Token/s（基于最近成功请求的 output_tokens / duration）
+        const validLogs = logs.filter(l => l.status === 'success' && l.output_tokens > 0 && l.duration > 0);
+        if (validLogs.length > 0) {
+            const totalOutputTokens = validLogs.reduce((sum, l) => sum + l.output_tokens, 0);
+            const totalDurationSec = validLogs.reduce((sum, l) => sum + l.duration, 0) / 1000;
+            const tps = totalDurationSec > 0 ? (totalOutputTokens / totalDurationSec).toFixed(1) : '-';
+            document.getElementById('tokensPerSec').textContent = tps;
+        } else {
+            document.getElementById('tokensPerSec').textContent = '-';
+        }
     }
 
     if (logs.length === 0) {

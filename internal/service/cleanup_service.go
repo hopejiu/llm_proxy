@@ -25,7 +25,11 @@ func NewCleanupService(hourlyStatRepo *repository.HourlyStatRepository, requestL
 // AggregateLastHour 汇总上一个小时的明细数据
 func (s *CleanupService) AggregateLastHour() error {
 	hourStart := time.Now().Truncate(time.Hour).Add(-time.Hour)
-	return s.aggregateHour(hourStart)
+	if err := s.aggregateHour(hourStart); err != nil {
+		return err
+	}
+	// 检查并补齐之前可能遗漏的小时
+	return s.BackfillMissingHours()
 }
 
 // aggregateHour 汇总指定小时的明细数据，成功后标记已汇总
@@ -110,9 +114,9 @@ func (s *CleanupService) DeleteOldRequestLogs() error {
 
 // Start 启动定时汇总和清理（后台 goroutine）
 func (s *CleanupService) Start(ctx context.Context) {
-	// 每小时汇总
-	hourlyTicker := time.NewTicker(time.Hour)
-	defer hourlyTicker.Stop()
+	// 计算到下一个整点的时长，确保在整点触发汇总
+	hourlyTimer := time.NewTimer(s.scheduleNextHourDuration())
+	defer hourlyTimer.Stop()
 
 	// 计算到下一个凌晨3点的时长
 	dailyTimer := s.scheduleNextDaily()
@@ -128,10 +132,12 @@ func (s *CleanupService) Start(ctx context.Context) {
 		case <-ctx.Done():
 			slog.Info("定时汇总和清理服务已停止")
 			return
-		case <-hourlyTicker.C:
+		case <-hourlyTimer.C:
 			if err := s.AggregateLastHour(); err != nil {
 				slog.Warn("定时汇总失败", "error", err)
 			}
+			// 重置为下一个整点
+			hourlyTimer.Reset(s.scheduleNextHourDuration())
 		case <-dailyTimer.C:
 			// 先汇总确保数据完整，再清理
 			if err := s.AggregateLastHour(); err != nil {
@@ -144,6 +150,13 @@ func (s *CleanupService) Start(ctx context.Context) {
 			dailyTimer.Reset(s.scheduleNextDailyDuration())
 		}
 	}
+}
+
+// scheduleNextHourDuration 计算到下一个整点的时长
+func (s *CleanupService) scheduleNextHourDuration() time.Duration {
+	now := time.Now()
+	nextHour := now.Truncate(time.Hour).Add(time.Hour)
+	return nextHour.Sub(now)
 }
 
 // scheduleNextDaily 创建一个在下一个凌晨3点触发的定时器

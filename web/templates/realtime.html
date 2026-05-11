@@ -44,7 +44,7 @@
     <!-- 主内容 -->
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <!-- 活跃请求概览 -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8 animate-fade-in">
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8 animate-fade-in">
             <div class="stats-card">
                 <div class="flex items-center justify-between mb-4">
                     <span class="text-sm font-medium text-gray-500">活跃请求</span>
@@ -72,6 +72,20 @@
                 <div class="mt-4 text-sm">
                     <span class="text-gray-400">成功率</span>
                     <p class="font-semibold text-green-600" id="successRate">-</p>
+                </div>
+            </div>
+
+            <div class="stats-card">
+                <div class="flex items-center justify-between mb-4">
+                    <span class="text-sm font-medium text-gray-500">输出速率</span>
+                    <span class="tag tag-primary">Speed</span>
+                </div>
+                <div class="flex items-baseline">
+                    <div class="stats-number" id="tokensPerSec">-</div>
+                    <span class="stats-unit">Token/s</span>
+                </div>
+                <div class="mt-4 text-sm">
+                    <span class="text-gray-400">基于最近成功请求</span>
                 </div>
             </div>
 
