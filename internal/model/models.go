@@ -111,3 +111,13 @@ type HourlyStat struct {
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }
+
+// HourlyStatsResult 分时统计结果
+type HourlyStatsResult struct {
+	Hour         int   `json:"hour"`
+	RequestCount int64 `json:"request_count"`
+	TotalTokens  int64 `json:"total_tokens"`
+	InputTokens  int64 `json:"input_tokens"`
+	OutputTokens int64 `json:"output_tokens"`
+	CachedTokens int64 `json:"cached_tokens"`
+}

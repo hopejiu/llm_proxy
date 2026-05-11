@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
 async function loadProviders() {
     try {
         const response = await fetch('/api/providers');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         providers = await response.json();
         renderProviders();
     } catch (error) {
@@ -43,7 +44,7 @@ function renderProviders() {
                 <p class="text-sm text-gray-500 truncate">${escapeHtml(p.base_url)}</p>
                 <div class="flex flex-wrap gap-2">
                     <span class="tag tag-primary">${escapeHtml(p.model)}</span>
-                    ${p.alias ? p.alias.split(',').map(a => `<span class="tag" style="background:#fef3c7;color:#92400e">${escapeHtml(a.trim())}</span>`).join('') : ''}
+                    ${p.alias ? p.alias.split(',').map(a => '<span class="tag tag-alias">' + escapeHtml(a.trim()) + '</span>').join('') : ''}
 
                 </div>
             </div>
@@ -226,7 +227,8 @@ async function confirmDelete() {
             closeDeleteModal();
             loadProviders();
         } else {
-            showToast('删除失败', 'error');
+            const error = await response.json().catch(() => ({}));
+            showToast(extractErrorMessage(error) || '删除失败', 'error');
         }
     } catch (error) {
         console.error('Failed to delete provider:', error);
@@ -238,6 +240,7 @@ async function confirmDelete() {
 async function exportProviders() {
     try {
         const response = await fetch('/api/providers/export');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -328,6 +331,13 @@ function onAutoSuffixChange() {
     const suffixSection = document.getElementById('suffixSection');
     suffixSection.style.display = autoSuffix ? 'block' : 'none';
     updateUrlPreview();
+}
+
+// API Key 显示/隐藏切换
+function toggleApiKeyVisibility() {
+    const input = document.getElementById('apiKey');
+    const isPassword = input.type === 'password';
+    input.type = isPassword ? 'text' : 'password';
 }
 
 // 更新 URL 拼接预览

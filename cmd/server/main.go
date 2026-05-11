@@ -62,11 +62,13 @@ func main() {
 	cleanOldData(requestLogRepo, cfg.LogCleanupDays)
 	fmt.Println("✓ 数据清理完成")
 
-	proxyService := service.NewProxyService(providerRepo, requestLogRepo, cfg.ProviderCacheTTL)
+	proxyService := service.NewProxyService(providerRepo, cfg.ProviderCacheTTL)
 	providerService := service.NewProviderService(providerRepo, proxyService)
 	statsService := service.NewStatsService(hourlyStatRepo, requestLogRepo)
 
-	webHandler := handler.NewWebHandler(providerService, statsService)
+	tracker := handler.NewActiveRequestTracker()
+
+	webHandler := handler.NewWebHandler(providerService, statsService, tracker)
 
 	handlerCfg := handler.HandlerConfig{
 		HTTPTimeout:            cfg.HTTPTimeout,
@@ -74,9 +76,12 @@ func main() {
 		StreamMaxRetries:       cfg.StreamMaxRetries,
 		RetryDelayBase:         cfg.RetryDelayBase,
 	}
-	proxyHandler := handler.NewProxyHandler(proxyService, requestLogRepo, handlerCfg)
-	anthropicHandler := handler.NewAnthropicHandler(proxyService, requestLogRepo, handlerCfg)
-	ollamaHandler := handler.NewOllamaHandler(proxyService, requestLogRepo, handlerCfg)
+	proxyHandler := handler.NewProxyHandler(proxyService, requestLogRepo, handlerCfg, tracker)
+	anthropicHandler := handler.NewAnthropicHandler(proxyService, requestLogRepo, handlerCfg, tracker)
+	ollamaHandler := handler.NewOllamaHandler(proxyService, requestLogRepo, handlerCfg, tracker)
+
+	checkPortAvailable(cfg.WebPort, "Web 配置服务")
+	checkPortAvailable(cfg.ProxyPort, "LLM 代理服务")
 
 	fmt.Println("→ 正在启动 Web 配置服务...")
 	webEngine := router.SetupWeb(webHandler)
@@ -140,6 +145,13 @@ func main() {
 
 // initDB 初始化数据库连接和迁移
 func initDB(cfg *config.Config) *gorm.DB {
+	db := connectDB(cfg)
+	migrateDB(db)
+	return db
+}
+
+// connectDB 连接数据库并配置连接池
+func connectDB(cfg *config.Config) *gorm.DB {
 	var db *gorm.DB
 	var err error
 
@@ -161,9 +173,7 @@ func initDB(cfg *config.Config) *gorm.DB {
 			slog.Error("SQLite数据库连接失败", "error", err, "path", dbPath)
 			pauseAndExit()
 		}
-		// SQLite 单写连接，避免锁冲突
-		sqlDB, _ := db.DB()
-		sqlDB.SetMaxOpenConns(1)
+		configurePool(db, cfg)
 	} else {
 		fmt.Println("→ 正在连接 MySQL 数据库...")
 		db, err = gorm.Open(mysql.Open(cfg.DSN()), &gorm.Config{})
@@ -172,16 +182,30 @@ func initDB(cfg *config.Config) *gorm.DB {
 			slog.Error("数据库连接失败", "error", err)
 			pauseAndExit()
 		}
+		configurePool(db, cfg)
+	}
+	fmt.Println("✓ 数据库连接成功")
+	slog.Info("数据库连接成功")
+	return db
+}
+
+// configurePool 配置数据库连接池
+func configurePool(db *gorm.DB, cfg *config.Config) {
+	sqlDB, _ := db.DB()
+	if cfg.IsSQLite() {
+		// SQLite 单写连接，避免锁冲突
+		sqlDB.SetMaxOpenConns(1)
+	} else {
 		// MySQL 连接池配置
-		sqlDB, _ := db.DB()
 		sqlDB.SetMaxOpenConns(25)
 		sqlDB.SetMaxIdleConns(10)
 		sqlDB.SetConnMaxLifetime(5 * time.Minute)
 		sqlDB.SetConnMaxIdleTime(time.Minute)
 	}
-	fmt.Println("✓ 数据库连接成功")
-	slog.Info("数据库连接成功")
+}
 
+// migrateDB 执行数据库迁移和索引创建
+func migrateDB(db *gorm.DB) {
 	fmt.Println("→ 正在初始化数据库表...")
 	if err := db.AutoMigrate(&model.ProviderConfig{}, &model.RequestLog{}, &model.HourlyStat{}); err != nil {
 		fmt.Println("✗ 数据库初始化失败")
@@ -202,8 +226,6 @@ func initDB(cfg *config.Config) *gorm.DB {
 
 	fmt.Println("✓ 数据库表初始化完成")
 	slog.Info("数据库表初始化完成")
-
-	return db
 }
 
 // createIndexesIfNotExist 为已有数据库创建索引
@@ -218,6 +240,17 @@ func createIndexesIfNotExist(db *gorm.DB) {
 			slog.Warn("创建索引失败", "sql", idx, "error", err)
 		}
 	}
+}
+
+// checkPortAvailable 检测端口是否可用，被占用时打印错误并退出
+func checkPortAvailable(port string, serviceName string) {
+	ln, err := net.Listen("tcp", ":"+port)
+	if err != nil {
+		fmt.Printf("✗ %s端口 %s 已被占用，请检查是否有其他程序正在使用该端口\n", serviceName, port)
+		slog.Error("端口已被占用", "service", serviceName, "port", port, "error", err)
+		pauseAndExit()
+	}
+	ln.Close()
 }
 
 // waitForPort 等待端口就绪（替代 time.Sleep 的硬等待）

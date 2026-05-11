@@ -689,34 +689,6 @@ function renderLogs(logs) {
     `}).join('');
 }
 
-// 工具函数：格式化数字
-function formatNumber(num) {
-    if (num === undefined || num === null || num === 0) return '0';
-    
-    if (num >= 10000) {
-        const wan = (num / 10000).toFixed(1);
-        return `${wan}万 (${num.toLocaleString()})`;
-    }
-
-    return num.toString();
-}
-
-// 工具函数：格式化时间
-function formatTime(timeStr) {
-    const date = new Date(timeStr);
-    const year = date.getFullYear();
-    const month = pad(date.getMonth() + 1);
-    const day = pad(date.getDate());
-    const hour = pad(date.getHours());
-    const minute = pad(date.getMinutes());
-    const second = pad(date.getSeconds());
-    return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
-}
-
-function pad(n) {
-    return n < 10 ? '0' + n : n;
-}
-
 // 窗口大小改变时重新调整图表
 let resizeTimeout;
 window.addEventListener('resize', () => {
@@ -730,100 +702,6 @@ window.addEventListener('resize', () => {
         }
     }, 100);
 });
-
-// 显示日志详情
-async function showLogDetail(id) {
-    try {
-        const response = await fetch(`/api/logs/${id}`);
-        if (!response.ok) {
-            showToast('获取日志详情失败', 'error');
-            return;
-        }
-        const log = await response.json();
-        
-        // 渲染元信息
-        const tokensPerSecond = log.duration > 0 ? (log.output_tokens * 1000 / log.duration).toFixed(1) : '-';
-        const durationSeconds = log.duration > 0 ? (log.duration / 1000).toFixed(1) + 's' : '-';
-        
-        document.getElementById('logMetaGrid').innerHTML = `
-            <div class="log-meta-item">
-                <span class="log-meta-label">时间</span>
-                <span class="log-meta-value">${formatTime(log.created_at)}</span>
-            </div>
-            <div class="log-meta-item">
-                <span class="log-meta-label">模型</span>
-                <span class="log-meta-value">${escapeHtml(log.model) || '-'}</span>
-            </div>
-            <div class="log-meta-item">
-                <span class="log-meta-label">Provider</span>
-                <span class="log-meta-value">${log.provider ? escapeHtml(log.provider.name) : '-'}</span>
-            </div>
-            <div class="log-meta-item">
-                <span class="log-meta-label">耗时</span>
-                <span class="log-meta-value">${durationSeconds}</span>
-            </div>
-            <div class="log-meta-item">
-                <span class="log-meta-label">Token/s</span>
-                <span class="log-meta-value">${tokensPerSecond}</span>
-            </div>
-            <div class="log-meta-item">
-                <span class="log-meta-label">状态</span>
-                <span class="log-meta-value">${log.status === 'success' 
-                    ? '<span class="tag tag-success">成功</span>' 
-                    : '<span class="tag tag-error">失败</span>'}</span>
-            </div>
-            <div class="log-meta-item">
-                <span class="log-meta-label">Input</span>
-                <span class="log-meta-value">${formatNumber(log.input_tokens)}</span>
-            </div>
-            <div class="log-meta-item">
-                <span class="log-meta-label">Output</span>
-                <span class="log-meta-value">${formatNumber(log.output_tokens)}</span>
-            </div>
-            <div class="log-meta-item">
-                <span class="log-meta-label">Cached</span>
-                <span class="log-meta-value" style="color:#059669;">${formatNumber(log.cached_tokens)}</span>
-            </div>
-            <div class="log-meta-item">
-                <span class="log-meta-label">Total</span>
-                <span class="log-meta-value" style="color:#7C3AED;">${formatNumber(log.total_tokens)}</span>
-            </div>
-        `;
-        
-        // 格式化JSON
-        let requestJson = log.request_body || '';
-        let responseContent = log.response_content || '';
-        
-        try {
-            requestJson = JSON.stringify(JSON.parse(requestJson), null, 2);
-        } catch (e) {}
-        
-        document.getElementById('requestBody').textContent = requestJson || '(空)';
-        document.getElementById('responseBody').textContent = responseContent || '(空)';
-        document.getElementById('logDetailModal').classList.add('active');
-    } catch (error) {
-        console.error('Failed to load log detail:', error);
-        showToast('获取日志详情失败', 'error');
-    }
-}
-
-// 关闭日志详情弹窗
-function closeLogDetailModal() {
-    document.getElementById('logDetailModal').classList.remove('active');
-}
-
-// 复制到剪贴板
-function copyToClipboard(elementId) {
-    const element = document.getElementById(elementId);
-    const text = element.textContent;
-    
-    navigator.clipboard.writeText(text).then(() => {
-        showToast('已复制到剪贴板', 'success');
-    }).catch(err => {
-        console.error('Failed to copy:', err);
-        showToast('复制失败', 'error');
-    });
-}
 
 // 周报模式切换
 function toggleWeeklyMode() {

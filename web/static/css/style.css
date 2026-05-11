@@ -99,6 +99,36 @@ body {
   color: #991B1B;
 }
 
+.tag-warn {
+  background: #FEF3C7;
+  color: #92400E;
+}
+
+.tag-alias {
+  background: #FEF3C7;
+  color: #92400E;
+}
+
+.tag-openai {
+  background: #D1FAE5;
+  color: #065F46;
+}
+
+.tag-anthropic {
+  background: #DBEAFE;
+  color: #1E40AF;
+}
+
+.tag-ollama {
+  background: #FEF3C7;
+  color: #92400E;
+}
+
+.tag-default {
+  background: #F1F5F9;
+  color: #475569;
+}
+
 /* 统计卡片 */
 .stats-card {
   background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
@@ -154,9 +184,17 @@ body {
   width: 90%;
   max-width: 600px;
   max-height: 90vh;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   transform: scale(0.95);
   transition: transform 0.3s ease;
+}
+
+.modal-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 0 1.5rem 1.5rem;
 }
 
 .modal-overlay.active .modal-content {
@@ -299,6 +337,42 @@ input:checked + .toggle-slider:before {
   .card {
     margin-bottom: 16px;
   }
+
+  .navbar .nav-links {
+    gap: 0.25rem;
+  }
+
+  .navbar .nav-links a,
+  .navbar .nav-links button {
+    padding: 0.375rem 0.5rem;
+    font-size: 0.8rem;
+  }
+
+  .navbar .nav-actions {
+    gap: 0.25rem;
+  }
+}
+
+/* API Key 显示/隐藏切换 */
+.api-key-wrapper {
+  position: relative;
+}
+
+.api-key-toggle {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  transition: color 0.2s ease;
+}
+
+.api-key-toggle:hover {
+  color: var(--primary);
 }
 
 .cached-text.hidden {
@@ -466,6 +540,32 @@ input:checked + .toggle-slider:before {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.log-meta-value.meta-cached {
+  color: #059669;
+}
+
+.log-meta-value.meta-total {
+  color: #7C3AED;
+}
+
+/* 危险按钮 */
+.btn-danger {
+  background: var(--error);
+  color: white;
+  padding: 10px 24px;
+  border-radius: 8px;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  border: none;
+  cursor: pointer;
+}
+
+.btn-danger:hover {
+  background: #DC2626;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+  transform: translateY(-1px);
 }
 
 /* 空状态 */
@@ -671,4 +771,154 @@ input:checked + .toggle-slider:before {
   border-color: var(--primary);
   color: var(--primary);
   background: #F5F3FF;
+}
+
+/* 实时监控 - 活跃请求卡片 */
+.active-request-card {
+  border: 1px solid #E2E8F0;
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: var(--bg-secondary);
+}
+
+.active-request-card:hover {
+  border-color: var(--primary);
+  box-shadow: 0 2px 8px rgba(139, 92, 246, 0.12);
+  transform: translateY(-1px);
+}
+
+.active-request-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.active-request-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.active-request-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.active-request-progress {
+  margin-top: 10px;
+  height: 3px;
+  background: #F1F5F9;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.active-request-progress-bar {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.active-request-progress-bar.streaming {
+  background: linear-gradient(90deg, #7C3AED, #A78BFA, #7C3AED);
+  background-size: 200% 100%;
+  animation: progress-streaming 1.5s ease-in-out infinite;
+  width: 60%;
+}
+
+.active-request-progress-bar.pending {
+  background: #F59E0B;
+  animation: progress-pending 2s ease-in-out infinite;
+  width: 30%;
+}
+
+/* 实时响应内容预览 */
+.active-request-response {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: #F8FAFC;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #475569;
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre-wrap;
+  word-break: break-all;
+  position: relative;
+}
+
+.active-request-response-label {
+  display: inline-block;
+  font-size: 11px;
+  color: #7C3AED;
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+/* 实时监控 - 工具调用 */
+.active-request-toolcalls {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.active-toolcall-item {
+  background: #FFFBEB;
+  border: 1px solid #FDE68A;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.active-toolcall-badge {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #92400E;
+  background: #FEF3C7;
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-bottom: 4px;
+}
+
+.active-toolcall-args {
+  font-size: 12px;
+  color: #78350F;
+  margin: 0;
+  padding: 4px 0 0 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: 'Menlo', 'Consolas', monospace;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+@keyframes progress-streaming {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@keyframes progress-pending {
+  0%, 100% { width: 20%; opacity: 0.6; }
+  50% { width: 40%; opacity: 1; }
+}
+
+/* 脉冲圆点 */
+.pulse-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #10B981;
+  animation: pulse-dot-anim 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-dot-anim {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.8); }
 }

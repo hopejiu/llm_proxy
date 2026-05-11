@@ -48,6 +48,23 @@ func (r *RequestLogRepository) GetRecent(limit int) ([]model.RequestLog, error) 
 	return logs, nil
 }
 
+// resolveProvider 根据 providerID 和 providerMap 解析 Provider 信息
+func resolveProvider(providerID uint, providerMap map[uint]model.ProviderConfig) model.ProviderConfig {
+	if providerID == model.DeletedProviderID {
+		return model.ProviderConfig{
+			ID:   model.DeletedProviderID,
+			Name: "已删除",
+		}
+	}
+	if p, ok := providerMap[providerID]; ok {
+		return p
+	}
+	return model.ProviderConfig{
+		ID:   providerID,
+		Name: "未知",
+	}
+}
+
 // fillProviderInfoBatch 批量填充 Provider 信息
 func (r *RequestLogRepository) fillProviderInfoBatch(logs []model.RequestLog) {
 	if len(logs) == 0 {
@@ -78,42 +95,20 @@ func (r *RequestLogRepository) fillProviderInfoBatch(logs []model.RequestLog) {
 
 	// 填充
 	for i := range logs {
-		if logs[i].ProviderID == model.DeletedProviderID {
-			logs[i].Provider = model.ProviderConfig{
-				ID:   model.DeletedProviderID,
-				Name: "已删除",
-			}
-		} else if p, ok := providerMap[logs[i].ProviderID]; ok {
-			logs[i].Provider = p
-		} else {
-			logs[i].Provider = model.ProviderConfig{
-				ID:   logs[i].ProviderID,
-				Name: "未知",
-			}
-		}
+		logs[i].Provider = resolveProvider(logs[i].ProviderID, providerMap)
 	}
 }
 
 // fillProviderInfo 填充Provider信息（ProviderID=DeletedProviderID时显示"已删除"）
 func (r *RequestLogRepository) fillProviderInfo(log *model.RequestLog) {
-	if log.ProviderID == model.DeletedProviderID {
-		log.Provider = model.ProviderConfig{
-			ID:   model.DeletedProviderID,
-			Name: "已删除",
-		}
-		return
-	}
-	// 正常查询Provider
-	var provider model.ProviderConfig
-	if err := r.db.First(&provider, log.ProviderID).Error; err == nil {
-		log.Provider = provider
-	} else {
-		// Provider不存在，显示未知
-		log.Provider = model.ProviderConfig{
-			ID:   log.ProviderID,
-			Name: "未知",
+	providerMap := make(map[uint]model.ProviderConfig)
+	if log.ProviderID != model.DeletedProviderID {
+		var provider model.ProviderConfig
+		if err := r.db.First(&provider, log.ProviderID).Error; err == nil {
+			providerMap[log.ProviderID] = provider
 		}
 	}
+	log.Provider = resolveProvider(log.ProviderID, providerMap)
 }
 
 // AggregateHour 汇总指定小时的明细数据为 HourlyStat
@@ -180,7 +175,7 @@ func (r *RequestLogRepository) GetCurrentHourStats() (*model.TokenStats, error) 
 }
 
 // GetCurrentHourHourlyStats 获取当前小时的分时统计（用于混合查询保证实时性）
-func (r *RequestLogRepository) GetCurrentHourHourlyStats() (*HourlyStatsResult, error) {
+func (r *RequestLogRepository) GetCurrentHourHourlyStats() (*model.HourlyStatsResult, error) {
 	hourStart := time.Now().Truncate(time.Hour)
 
 	var hourExpr string
@@ -190,7 +185,7 @@ func (r *RequestLogRepository) GetCurrentHourHourlyStats() (*HourlyStatsResult, 
 		hourExpr = "EXTRACT(HOUR FROM created_at)"
 	}
 
-	var result HourlyStatsResult
+	var result model.HourlyStatsResult
 	err := r.db.Raw(fmt.Sprintf(`
 		SELECT
 			%s as hour,
@@ -207,7 +202,7 @@ func (r *RequestLogRepository) GetCurrentHourHourlyStats() (*HourlyStatsResult, 
 }
 
 // GetHourlyStatsByDateFromLogs 从明细表获取指定日期的分时统计（用于历史日期无汇总数据时的回退查询）
-func (r *RequestLogRepository) GetHourlyStatsByDateFromLogs(date time.Time) ([]HourlyStatsResult, error) {
+func (r *RequestLogRepository) GetHourlyStatsByDateFromLogs(date time.Time) ([]model.HourlyStatsResult, error) {
 	dayStart := date.Truncate(24 * time.Hour)
 	dayEnd := dayStart.Add(24 * time.Hour)
 
@@ -218,7 +213,7 @@ func (r *RequestLogRepository) GetHourlyStatsByDateFromLogs(date time.Time) ([]H
 		hourExpr = "EXTRACT(HOUR FROM created_at)"
 	}
 
-	var results []HourlyStatsResult
+	var results []model.HourlyStatsResult
 	err := r.db.Raw(fmt.Sprintf(`
 		SELECT
 			%s as hour,
@@ -260,12 +255,4 @@ func (r *RequestLogRepository) DeleteOldRequestLogs(days int) (int64, error) {
 	return result.RowsAffected, result.Error
 }
 
-// HourlyStats 每小时统计数据（兼容旧接口）
-type HourlyStats struct {
-	Hour         int   `json:"hour"`
-	RequestCount int64 `json:"request_count"`
-	TotalTokens  int64 `json:"total_tokens"`
-	InputTokens  int64 `json:"input_tokens"`
-	OutputTokens int64 `json:"output_tokens"`
-	CachedTokens int64 `json:"cached_tokens"`
-}
+

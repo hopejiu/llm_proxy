@@ -23,6 +23,72 @@ import (
 // requestIDKey 用于在 context 中存储请求 ID
 type requestIDKey struct{}
 
+// ProxyRequestInfo 代理请求的公共信息
+type ProxyRequestInfo struct {
+	Model       string
+	Stream      bool
+	Protocol    string // "openai" | "anthropic" | "ollama"
+}
+
+// ParseRequestFunc 解析请求体的回调，返回请求信息或错误
+type ParseRequestFunc func(body []byte) (*ProxyRequestInfo, error)
+
+// HandleRequestFunc 处理请求的回调（流式或非流式）
+type HandleRequestFunc func(c *gin.Context, body []byte, startTime time.Time)
+
+// HandleProxyRequest 代理请求的模板方法，封装公共流程
+func (h *BaseHandler) HandleProxyRequest(
+	c *gin.Context,
+	protocol string,
+	parseRequest ParseRequestFunc,
+	handleStream HandleRequestFunc,
+	handleNormal HandleRequestFunc,
+) {
+	startTime := time.Now()
+
+	// 注入 requestID 到 context
+	requestID := generateRequestID()
+	ctx := contextWithRequestID(c.Request.Context(), requestID)
+	c.Request = c.Request.WithContext(ctx)
+
+	body, err := h.ReadBody(c)
+	if err != nil {
+		slog.Error(protocol+" request", "requestID", requestID, "status", "ERROR", "error", "failed to read request body")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
+		return
+	}
+
+	reqInfo, err := parseRequest(body)
+	if err != nil {
+		slog.Error(protocol+" request", "requestID", requestID, "status", "ERROR", "error", err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 注册活跃请求
+	tracker := h.tracker
+	activeReq := &ActiveRequest{
+		RequestID:   requestID,
+		Model:       reqInfo.Model,
+		RequestBody: string(body),
+		Status:      "pending",
+		StartTime:   startTime,
+		Protocol:    reqInfo.Protocol,
+		ClientIP:    c.ClientIP(),
+	}
+	if reqInfo.Stream {
+		activeReq.Status = "streaming"
+	}
+	tracker.Add(activeReq)
+	defer tracker.Remove(requestID)
+
+	if reqInfo.Stream {
+		handleStream(c, body, startTime)
+	} else {
+		handleNormal(c, body, startTime)
+	}
+}
+
 // UpstreamError 上游 API 返回的错误，携带状态码和响应体
 type UpstreamError struct {
 	StatusCode int
@@ -47,17 +113,19 @@ type BaseHandler struct {
 	requestLogRepo *repository.RequestLogRepository
 	httpClient     *http.Client
 	config         HandlerConfig
+	tracker        *ActiveRequestTracker
 }
 
 // NewBaseHandler 创建 BaseHandler 实例
-func NewBaseHandler(proxyService *service.ProxyService, requestLogRepo *repository.RequestLogRepository, cfg HandlerConfig) *BaseHandler {
+func NewBaseHandler(proxyService *service.ProxyService, requestLogRepo *repository.RequestLogRepository, cfg HandlerConfig, tracker *ActiveRequestTracker) *BaseHandler {
 	return &BaseHandler{
 		proxyService:   proxyService,
 		requestLogRepo: requestLogRepo,
 		httpClient: &http.Client{
 			Timeout: cfg.HTTPTimeout,
 		},
-		config: cfg,
+		config:  cfg,
+		tracker: tracker,
 	}
 }
 
@@ -79,6 +147,54 @@ func requestIDFromContext(ctx context.Context) string {
 	return ""
 }
 
+// ResolveUpstreamError 解析上游错误，返回 HTTP 状态码和错误消息
+func ResolveUpstreamError(err error) (statusCode int, message string) {
+	statusCode = http.StatusInternalServerError
+	message = err.Error()
+	if upErr, ok := err.(*UpstreamError); ok {
+		statusCode = upErr.StatusCode
+		message = upErr.Body
+	}
+	return
+}
+
+// LogRequest 记录请求汇总日志
+func (h *BaseHandler) LogRequest(c *gin.Context, reqBody []byte, startTime time.Time, status string, errMsg string, provider *model.ProviderConfig) {
+	duration := time.Since(startTime).Milliseconds()
+
+	var reqInfo struct {
+		Model  string `json:"model"`
+		Stream bool   `json:"stream"`
+	}
+	json.Unmarshal(reqBody, &reqInfo)
+
+	requestID := requestIDFromContext(c.Request.Context())
+
+	attrs := []any{
+		"requestID", requestID,
+		"method", c.Request.Method,
+		"path", c.Request.URL.Path,
+		"clientIP", c.ClientIP(),
+		"model", reqInfo.Model,
+		"stream", reqInfo.Stream,
+		"duration_ms", duration,
+		"status", status,
+	}
+	if provider != nil {
+		attrs = append(attrs, "provider", provider.Name)
+	}
+	if errMsg != "" {
+		attrs = append(attrs, "error", errMsg)
+	}
+
+	switch status {
+	case "ERROR", "FAILED":
+		slog.Error("proxy request", attrs...)
+	default:
+		slog.Info("proxy request", attrs...)
+	}
+}
+
 // GetProviderByModel 根据模型名匹配 Provider
 func (h *BaseHandler) GetProviderByModel(modelName string) (*model.ProviderConfig, error) {
 	return h.proxyService.GetProviderByModel(modelName)
@@ -94,13 +210,8 @@ func (h *BaseHandler) PrepareRequestBody(body []byte, provider *model.ProviderCo
 	return h.proxyService.PrepareRequestBody(body, provider)
 }
 
-// SendStreamRequest 发送流式 HTTP 请求
-func (h *BaseHandler) SendStreamRequest(ctx context.Context, url string, body []byte, apiKey string) (*http.Response, error) {
-	return h.SendStreamRequestWithHeaders(ctx, url, body, apiKey, nil)
-}
-
-// SendStreamRequestWithHeaders 发送流式 HTTP 请求（支持自定义 header）
-func (h *BaseHandler) SendStreamRequestWithHeaders(ctx context.Context, url string, body []byte, apiKey string, extraHeaders http.Header) (*http.Response, error) {
+// buildHTTPRequest 构建公共 HTTP 请求（消除流式/非流式请求构建的重复代码）
+func (h *BaseHandler) buildHTTPRequest(ctx context.Context, url string, body []byte, apiKey string, extraHeaders http.Header, isStream bool) (*http.Request, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -108,7 +219,9 @@ func (h *BaseHandler) SendStreamRequestWithHeaders(ctx context.Context, url stri
 
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
-	httpReq.Header.Set("Accept", "text/event-stream")
+	if isStream {
+		httpReq.Header.Set("Accept", "text/event-stream")
+	}
 
 	// 合并自定义 header
 	if extraHeaders != nil {
@@ -125,6 +238,21 @@ func (h *BaseHandler) SendStreamRequestWithHeaders(ctx context.Context, url stri
 			httpReq.Host = hostValues[0]
 			delete(httpReq.Header, "Host")
 		}
+	}
+
+	return httpReq, nil
+}
+
+// SendStreamRequest 发送流式 HTTP 请求
+func (h *BaseHandler) SendStreamRequest(ctx context.Context, url string, body []byte, apiKey string) (*http.Response, error) {
+	return h.SendStreamRequestWithHeaders(ctx, url, body, apiKey, nil)
+}
+
+// SendStreamRequestWithHeaders 发送流式 HTTP 请求（支持自定义 header）
+func (h *BaseHandler) SendStreamRequestWithHeaders(ctx context.Context, url string, body []byte, apiKey string, extraHeaders http.Header) (*http.Response, error) {
+	httpReq, err := h.buildHTTPRequest(ctx, url, body, apiKey, extraHeaders, true)
+	if err != nil {
+		return nil, err
 	}
 
 	httpResp, err := h.httpClient.Do(httpReq)
@@ -148,29 +276,9 @@ func (h *BaseHandler) SendRequest(ctx context.Context, url string, body []byte, 
 
 // SendRequestWithHeaders 发送普通 HTTP 请求（支持自定义 header）
 func (h *BaseHandler) SendRequestWithHeaders(ctx context.Context, url string, body []byte, apiKey string, extraHeaders http.Header) ([]byte, error) {
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	httpReq, err := h.buildHTTPRequest(ctx, url, body, apiKey, extraHeaders, false)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
-
-	// 合并自定义 header
-	if extraHeaders != nil {
-		for key, values := range extraHeaders {
-			for _, value := range values {
-				httpReq.Header.Add(key, value)
-			}
-		}
-		// Go 的 http.Client.Do() 会忽略 Header map 中的 Host key，
-		// 实际发送的 Host header 取自 httpReq.Host 字段。
-		// 部分API网关（如讯飞）的HMAC签名校验要求 host 请求头必须参与签名，
-		// 因此需要将 extraHeaders 中的 host 同步到 httpReq.Host。
-		if hostValues := extraHeaders.Values("host"); len(hostValues) > 0 {
-			httpReq.Host = hostValues[0]
-			delete(httpReq.Header, "Host")
-		}
+		return nil, err
 	}
 
 	httpResp, err := h.httpClient.Do(httpReq)
@@ -504,8 +612,6 @@ func parseStreamResponse(sseData string) string {
 	var contentBuilder strings.Builder
 	var reasoningBuilder strings.Builder
 	var lastChunk map[string]interface{}
-
-	// tool_calls 拼接：按 index 存储每个 tool_call 的片段
 	toolCalls := make(map[int]map[string]interface{})
 
 	lines := strings.Split(sseData, "\n")
@@ -514,114 +620,127 @@ func parseStreamResponse(sseData string) string {
 		if line == "" || !strings.HasPrefix(line, "data: ") {
 			continue
 		}
-
 		data := strings.TrimPrefix(line, "data: ")
 		if data == "[DONE]" {
 			continue
 		}
-
 		var chunk map[string]interface{}
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			continue
 		}
-
 		lastChunk = chunk
+		parseContentFromChunk(chunk, &contentBuilder, &reasoningBuilder)
+		parseToolCallsFromChunk(chunk, toolCalls)
+	}
 
-		// 提取 choices[0].delta.content
-		if choices, ok := chunk["choices"].([]interface{}); ok && len(choices) > 0 {
-			if choice, ok := choices[0].(map[string]interface{}); ok {
-				if delta, ok := choice["delta"].(map[string]interface{}); ok {
-					// 提取普通内容
-					if content, ok := delta["content"].(string); ok {
-						contentBuilder.WriteString(content)
-					}
-					// 提取推理内容
-					if reasoning, ok := delta["reasoning_content"].(string); ok && reasoning != "" {
-						reasoningBuilder.WriteString(reasoning)
-					}
-					// 提取 tool_calls
-					if toolCallsDelta, ok := delta["tool_calls"].([]interface{}); ok {
-						for _, tc := range toolCallsDelta {
-							if tcMap, ok := tc.(map[string]interface{}); ok {
-								index := 0
-								if idx, ok := tcMap["index"].(float64); ok {
-									index = int(idx)
-								}
-								// 初始化该 index 的 tool_call
-								if toolCalls[index] == nil {
-									toolCalls[index] = map[string]interface{}{
-										"id":   "",
-										"type": "function",
-										"function": map[string]string{
-											"name":      "",
-											"arguments": "",
-										},
-									}
-								}
-								// 拼接 id
-								if id, ok := tcMap["id"].(string); ok && id != "" {
-									toolCalls[index]["id"] = id
-								}
-								// 拼接 type
-								if t, ok := tcMap["type"].(string); ok && t != "" {
-									toolCalls[index]["type"] = t
-								}
-								// 拼接 function
-								if fn, ok := tcMap["function"].(map[string]interface{}); ok {
-									fnMap := toolCalls[index]["function"].(map[string]string)
-									if name, ok := fn["name"].(string); ok && name != "" {
-										fnMap["name"] = name
-									}
-									if args, ok := fn["arguments"].(string); ok {
-										fnMap["arguments"] += args
-									}
-								}
-							}
-						}
-					}
-				}
+	return buildParsedResult(contentBuilder, reasoningBuilder, toolCalls, lastChunk)
+}
+
+// parseContentFromChunk 从 chunk 中提取文本和推理内容
+func parseContentFromChunk(chunk map[string]interface{}, contentBuilder, reasoningBuilder *strings.Builder) {
+	choices, ok := chunk["choices"].([]interface{})
+	if !ok || len(choices) == 0 {
+		return
+	}
+	choice, ok := choices[0].(map[string]interface{})
+	if !ok {
+		return
+	}
+	delta, ok := choice["delta"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	if content, ok := delta["content"].(string); ok {
+		contentBuilder.WriteString(content)
+	}
+	if reasoning, ok := delta["reasoning_content"].(string); ok && reasoning != "" {
+		reasoningBuilder.WriteString(reasoning)
+	}
+}
+
+// parseToolCallsFromChunk 从 chunk 中提取 tool_calls 片段并拼接
+func parseToolCallsFromChunk(chunk map[string]interface{}, toolCalls map[int]map[string]interface{}) {
+	choices, ok := chunk["choices"].([]interface{})
+	if !ok || len(choices) == 0 {
+		return
+	}
+	choice, ok := choices[0].(map[string]interface{})
+	if !ok {
+		return
+	}
+	delta, ok := choice["delta"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	toolCallsDelta, ok := delta["tool_calls"].([]interface{})
+	if !ok {
+		return
+	}
+	for _, tc := range toolCallsDelta {
+		tcMap, ok := tc.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		index := 0
+		if idx, ok := tcMap["index"].(float64); ok {
+			index = int(idx)
+		}
+		if toolCalls[index] == nil {
+			toolCalls[index] = map[string]interface{}{
+				"id":   "",
+				"type": "function",
+				"function": map[string]string{
+					"name":      "",
+					"arguments": "",
+				},
+			}
+		}
+		if id, ok := tcMap["id"].(string); ok && id != "" {
+			toolCalls[index]["id"] = id
+		}
+		if t, ok := tcMap["type"].(string); ok && t != "" {
+			toolCalls[index]["type"] = t
+		}
+		if fn, ok := tcMap["function"].(map[string]interface{}); ok {
+			fnMap := toolCalls[index]["function"].(map[string]string)
+			if name, ok := fn["name"].(string); ok && name != "" {
+				fnMap["name"] = name
+			}
+			if args, ok := fn["arguments"].(string); ok {
+				fnMap["arguments"] += args
 			}
 		}
 	}
+}
 
-	// 构建可读的 JSON 结果
+// buildParsedResult 构建格式化的解析结果
+func buildParsedResult(contentBuilder, reasoningBuilder strings.Builder, toolCalls map[int]map[string]interface{}, lastChunk map[string]interface{}) string {
 	result := map[string]interface{}{
 		"content": contentBuilder.String(),
 	}
-
-	// 如果有推理内容，也加入
 	if reasoningBuilder.Len() > 0 {
 		result["reasoning_content"] = reasoningBuilder.String()
 	}
-
-	// 如果有 tool_calls，按 index 顺序加入
 	if len(toolCalls) > 0 {
 		indices := make([]int, 0, len(toolCalls))
 		for idx := range toolCalls {
 			indices = append(indices, idx)
 		}
-		// 排序
 		sort.Ints(indices)
-		// 按顺序构建 tool_calls 数组
 		tcArray := make([]map[string]interface{}, len(indices))
 		for i, idx := range indices {
 			tcArray[i] = toolCalls[idx]
 		}
 		result["tool_calls"] = tcArray
 	}
-
-	// 从最后一个 chunk 提取 usage 信息
 	if lastChunk != nil {
 		if usage, ok := lastChunk["usage"].(map[string]interface{}); ok {
 			result["usage"] = usage
 		}
-		// 提取 model
-		if model, ok := lastChunk["model"].(string); ok {
-			result["model"] = model
+		if m, ok := lastChunk["model"].(string); ok {
+			result["model"] = m
 		}
 	}
-
-	// 格式化输出
 	jsonBytes, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
 		return contentBuilder.String()

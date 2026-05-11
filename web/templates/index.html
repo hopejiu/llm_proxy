@@ -17,7 +17,10 @@
                     </svg>
                     <span class="text-xl font-bold">LLM 中转配置</span>
                 </div>
-                <div class="flex items-center space-x-4">
+                <div class="flex items-center space-x-4 nav-links">
+                    <a href="/realtime" class="text-white hover:text-purple-200 transition-colors px-4 py-2 rounded-lg hover:bg-white/10">
+                        实时监控
+                    </a>
                     <a href="/stats" class="text-white hover:text-purple-200 transition-colors px-4 py-2 rounded-lg hover:bg-white/10">
                         统计报表
                     </a>
@@ -114,7 +117,15 @@
                     </div>
                     <div>
                         <label class="form-label">API Key</label>
-                        <input type="password" id="apiKey" class="form-input" placeholder="sk-..." required>
+                        <div class="api-key-wrapper">
+                            <input type="password" id="apiKey" class="form-input" placeholder="sk-..." required>
+                            <button type="button" class="api-key-toggle" onclick="toggleApiKeyVisibility()" title="显示/隐藏">
+                                <svg id="apiKeyEyeIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                                </svg>
+                            </button>
+                        </div>
                     </div>
                     <div>
                         <label class="form-label">模型</label>
@@ -153,7 +164,7 @@
                 <p class="text-gray-500 mb-6">此操作不可撤销，确定要删除这个配置吗？</p>
                 <div class="flex justify-center space-x-3">
                     <button onclick="closeDeleteModal()" class="btn-secondary">取消</button>
-                    <button onclick="confirmDelete()" class="btn-primary bg-red-500 hover:bg-red-600" style="background: #EF4444;">删除</button>
+                    <button onclick="confirmDelete()" class="btn-danger">删除</button>
                 </div>
             </div>
         </div>

@@ -18,12 +18,14 @@ import (
 type WebHandler struct {
 	providerService *service.ProviderService
 	statsService    *service.StatsService
+	tracker         *ActiveRequestTracker
 }
 
-func NewWebHandler(providerService *service.ProviderService, statsService *service.StatsService) *WebHandler {
+func NewWebHandler(providerService *service.ProviderService, statsService *service.StatsService, tracker *ActiveRequestTracker) *WebHandler {
 	return &WebHandler{
 		providerService: providerService,
 		statsService:    statsService,
+		tracker:         tracker,
 	}
 }
 
@@ -35,6 +37,11 @@ func (h *WebHandler) Index(c *gin.Context) {
 // StatsPage 统计页面
 func (h *WebHandler) StatsPage(c *gin.Context) {
 	c.HTML(http.StatusOK, "stats.html", gin.H{})
+}
+
+// RealtimePage 实时监控页面
+func (h *WebHandler) RealtimePage(c *gin.Context) {
+	c.HTML(http.StatusOK, "realtime.html", gin.H{})
 }
 
 // GetProviders 获取所有Provider
@@ -183,6 +190,13 @@ func (h *WebHandler) GetRecentLogs(c *gin.Context) {
 	respondOK(c, logs)
 }
 
+// GetActiveRequests 获取当前正在进行的请求
+func (h *WebHandler) GetActiveRequests(c *gin.Context) {
+	tracker := h.tracker
+	activeReqs := tracker.GetAll()
+	respondOK(c, activeReqs)
+}
+
 // ExportProviders 导出所有Provider配置为JSON
 func (h *WebHandler) ExportProviders(c *gin.Context) {
 	providers, err := h.providerService.GetAllProviders()
@@ -271,24 +285,6 @@ func (h *WebHandler) GetTodayHourlyStats(c *gin.Context) {
 	respondOK(c, stats)
 }
 
-// CodeBuddyModel CodeBuddy models.json 中的模型结构
-type CodeBuddyModel struct {
-	ID                string  `json:"id"`
-	Name              string  `json:"name"`
-	Vendor            string  `json:"vendor"`
-	APIKey            string  `json:"apiKey"`
-	URL               string  `json:"url"`
-	SupportsToolCall  bool    `json:"supportsToolCall"`
-	SupportsReasoning bool    `json:"supportsReasoning"`
-	Temperature       float64 `json:"temperature"`
-	MaxInputTokens    int     `json:"maxInputTokens"`
-}
-
-// CodeBuddyConfig CodeBuddy models.json 配置结构
-type CodeBuddyConfig struct {
-	Models []CodeBuddyModel `json:"models"`
-}
-
 // SetupCodeBuddy 配置 CodeBuddy models.json
 func (h *WebHandler) SetupCodeBuddy(c *gin.Context) {
 	// 获取用户主目录
@@ -310,18 +306,18 @@ func (h *WebHandler) SetupCodeBuddy(c *gin.Context) {
 		return
 	}
 
-	var config CodeBuddyConfig
+	var config model.CodeBuddyConfig
 
 	// 读取现有配置（如果存在）
 	if data, err := os.ReadFile(modelsFilePath); err == nil {
 		if err := json.Unmarshal(data, &config); err != nil {
 			slog.Warn("解析models.json失败", "error", err)
 			// 解析失败，使用空配置
-			config = CodeBuddyConfig{Models: []CodeBuddyModel{}}
+			config = model.CodeBuddyConfig{Models: []model.CodeBuddyModel{}}
 		}
 	} else {
 		// 文件不存在，创建空配置
-		config = CodeBuddyConfig{Models: []CodeBuddyModel{}}
+		config = model.CodeBuddyConfig{Models: []model.CodeBuddyModel{}}
 	}
 
 	// 检查是否已存在 localhost:8888/v1 的配置
@@ -336,7 +332,7 @@ func (h *WebHandler) SetupCodeBuddy(c *gin.Context) {
 
 	// 如果不存在，添加新配置
 	if !exists {
-		newModel := CodeBuddyModel{
+		newModel := model.CodeBuddyModel{
 			ID:                "astron-code-latest",
 			Name:              "大模型",
 			Vendor:            "自定义大模型",

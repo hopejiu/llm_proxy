@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"llm-proxy/internal/converter"
 	"llm-proxy/internal/model"
 	"llm-proxy/internal/repository"
@@ -21,55 +22,37 @@ type OllamaHandler struct {
 }
 
 // NewOllamaHandler 创建 Ollama 适配器
-func NewOllamaHandler(proxyService *service.ProxyService, requestLogRepo *repository.RequestLogRepository, cfg HandlerConfig) *OllamaHandler {
+func NewOllamaHandler(proxyService *service.ProxyService, requestLogRepo *repository.RequestLogRepository, cfg HandlerConfig, tracker *ActiveRequestTracker) *OllamaHandler {
 	return &OllamaHandler{
-		BaseHandler: NewBaseHandler(proxyService, requestLogRepo, cfg),
+		BaseHandler: NewBaseHandler(proxyService, requestLogRepo, cfg, tracker),
 	}
 }
 
 // Chat 处理 /api/chat 请求
 func (h *OllamaHandler) Chat(c *gin.Context) {
-	startTime := time.Now()
-	// 注入 requestID 到 context
-	ctx := contextWithRequestID(c.Request.Context(), generateRequestID())
-	c.Request = c.Request.WithContext(ctx)
-
-	body, err := h.ReadBody(c)
-	if err != nil {
-		slog.Error("ollama request", "requestID", requestIDFromContext(ctx), "status", "ERROR", "error", err.Error())
-		c.JSON(http.StatusBadRequest, model.OllamaChatResponse{
-			Model:      "",
-			CreatedAt:  time.Now().Format(time.RFC3339),
-			Message:    model.OllamaMessage{Role: "assistant", Content: ""},
-			Done:       true,
-			DoneReason: "error",
-		})
-		return
-	}
-
-	var ollamaReq model.OllamaChatRequest
-	if err := json.Unmarshal(body, &ollamaReq); err != nil {
-		slog.Error("ollama request", "requestID", requestIDFromContext(ctx), "status", "ERROR", "error", "invalid request body")
-		c.JSON(http.StatusBadRequest, model.OllamaChatResponse{
-			Model:      "",
-			CreatedAt:  time.Now().Format(time.RFC3339),
-			Message:    model.OllamaMessage{Role: "assistant", Content: "invalid request"},
-			Done:       true,
-			DoneReason: "error",
-		})
-		return
-	}
-
-	if ollamaReq.Stream {
-		h.handleStreamChat(c, &ollamaReq, startTime)
-	} else {
-		h.handleNonStreamChat(c, &ollamaReq, startTime)
-	}
+	h.HandleProxyRequest(c, "ollama",
+		func(body []byte) (*ProxyRequestInfo, error) {
+			var ollamaReq model.OllamaChatRequest
+			if err := json.Unmarshal(body, &ollamaReq); err != nil {
+				return nil, fmt.Errorf("invalid request body")
+			}
+			return &ProxyRequestInfo{Model: ollamaReq.Model, Stream: ollamaReq.Stream, Protocol: "ollama"}, nil
+		},
+		func(c *gin.Context, body []byte, startTime time.Time) {
+			h.handleStreamChat(c, body, startTime)
+		},
+		func(c *gin.Context, body []byte, startTime time.Time) {
+			h.handleNonStreamChat(c, body, startTime)
+		},
+	)
 }
 
 // handleNonStreamChat 处理非流式聊天请求
-func (h *OllamaHandler) handleNonStreamChat(c *gin.Context, ollamaReq *model.OllamaChatRequest, startTime time.Time) {
+func (h *OllamaHandler) handleNonStreamChat(c *gin.Context, body []byte, startTime time.Time) {
 	requestID := requestIDFromContext(c.Request.Context())
+
+	var ollamaReq model.OllamaChatRequest
+	json.Unmarshal(body, &ollamaReq)
 
 	provider, err := h.GetProviderByModel(ollamaReq.Model)
 	if err != nil {
@@ -84,7 +67,10 @@ func (h *OllamaHandler) handleNonStreamChat(c *gin.Context, ollamaReq *model.Oll
 		return
 	}
 
-	openAIReq := converter.OllamaToOpenAI(ollamaReq, provider.Model)
+	// 更新活跃请求的 Provider 信息
+	h.tracker.UpdateProvider(requestID, provider.ID, provider.Name)
+
+	openAIReq := converter.OllamaToOpenAI(&ollamaReq, provider.Model)
 	openAIBody, _ := json.Marshal(openAIReq)
 	openAIBody = h.PrepareRequestBody(openAIBody, provider)
 
@@ -93,15 +79,8 @@ func (h *OllamaHandler) handleNonStreamChat(c *gin.Context, ollamaReq *model.Oll
 
 	respBody, err := h.SendRequest(ctx, provider.GetRequestURL(), openAIBody, provider.APIKey)
 	if err != nil {
-		errMsg := err.Error()
-		if upErr, ok := err.(*UpstreamError); ok {
-			errMsg = upErr.Body
-		}
+		statusCode, errMsg := ResolveUpstreamError(err)
 		slog.Error("ollama request", "requestID", requestID, "provider", provider.Name, "model", provider.Model, "status", "FAILED", "duration_ms", time.Since(startTime).Milliseconds(), "error", errMsg)
-		statusCode := http.StatusInternalServerError
-		if upErr, ok := err.(*UpstreamError); ok {
-			statusCode = upErr.StatusCode
-		}
 		c.JSON(statusCode, model.OllamaChatResponse{
 			Model:      provider.Model,
 			CreatedAt:  time.Now().Format(time.RFC3339),
@@ -145,8 +124,12 @@ func (h *OllamaHandler) handleNonStreamChat(c *gin.Context, ollamaReq *model.Oll
 }
 
 // handleStreamChat 处理流式聊天请求（支持超时重试）
-func (h *OllamaHandler) handleStreamChat(c *gin.Context, ollamaReq *model.OllamaChatRequest, startTime time.Time) {
+func (h *OllamaHandler) handleStreamChat(c *gin.Context, body []byte, startTime time.Time) {
 	requestID := requestIDFromContext(c.Request.Context())
+
+	var ollamaReq model.OllamaChatRequest
+	json.Unmarshal(body, &ollamaReq)
+
 	c.Header("Content-Type", "application/x-ndjson")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
@@ -158,11 +141,15 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, ollamaReq *model.Ollama
 		return
 	}
 
-	openAIReq := converter.OllamaToOpenAI(ollamaReq, provider.Model)
+	// 更新活跃请求的 Provider 信息
+	h.tracker.UpdateProvider(requestID, provider.ID, provider.Name)
+
+	openAIReq := converter.OllamaToOpenAI(&ollamaReq, provider.Model)
 	openAIBody, _ := json.Marshal(openAIReq)
 	openAIBody = h.PrepareRequestBody(openAIBody, provider)
 
 	var fullContent strings.Builder
+	tracker := h.tracker
 
 	// 使用 base_handler 的 ExecuteStreamWithRetry
 	responseBuilder, tokens, lastErr := h.ExecuteStreamWithRetry(
@@ -184,6 +171,16 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, ollamaReq *model.Ollama
 
 				ollamaChunk := converter.OpenAIStreamToOllamaChunk(streamResp, provider.Model)
 				fullContent.WriteString(ollamaChunk.Message.Content)
+				tracker.AppendResponse(requestID, ollamaChunk.Message.Content)
+
+				// 追踪工具调用
+				if choices, ok := streamResp["choices"].([]interface{}); ok && len(choices) > 0 {
+					if choice, ok := choices[0].(map[string]interface{}); ok {
+						if delta, ok := choice["delta"].(map[string]interface{}); ok {
+							trackToolCallsFromDelta(delta, requestID, tracker)
+						}
+					}
+				}
 
 				chunkBytes, _ := json.Marshal(ollamaChunk)
 				c.Writer.Write(chunkBytes)

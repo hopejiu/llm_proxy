@@ -110,7 +110,7 @@ func (s *StatsService) GetLogDetail(id uint) (*model.RequestLog, error) {
 }
 
 // GetTodayHourlyStats 获取今日分时统计（汇总表已完成小时 + 明细表当前小时，保证实时性）
-func (s *StatsService) GetTodayHourlyStats() ([]repository.HourlyStatsResult, error) {
+func (s *StatsService) GetTodayHourlyStats() ([]model.HourlyStatsResult, error) {
 	// 从汇总表获取今日已完成小时的统计
 	hourlyStats, err := s.hourlyStatRepo.GetTodayHourlyStats()
 	if err != nil {
@@ -134,7 +134,7 @@ func (s *StatsService) GetTodayHourlyStats() ([]repository.HourlyStatsResult, er
 // GetHourlyStatsByDate 获取指定日期的分时统计
 // 今日：汇总表已完成小时 + 明细表当前小时（保证实时性）
 // 历史日期：优先从汇总表读取，若汇总表无数据则回退到明细表查询
-func (s *StatsService) GetHourlyStatsByDate(date time.Time) ([]repository.HourlyStatsResult, error) {
+func (s *StatsService) GetHourlyStatsByDate(date time.Time) ([]model.HourlyStatsResult, error) {
 	now := time.Now()
 	isToday := date.Truncate(24*time.Hour).Equal(now.Truncate(24*time.Hour))
 

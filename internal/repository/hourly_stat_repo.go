@@ -161,27 +161,17 @@ func (r *HourlyStatRepository) GetDailyStats(days int) ([]model.TokenStats, erro
 	return result, nil
 }
 
-// HourlyStatsResult 分时统计结果
-type HourlyStatsResult struct {
-	Hour         int   `json:"hour"`
-	RequestCount int64 `json:"request_count"`
-	TotalTokens  int64 `json:"total_tokens"`
-	InputTokens  int64 `json:"input_tokens"`
-	OutputTokens int64 `json:"output_tokens"`
-	CachedTokens int64 `json:"cached_tokens"`
-}
-
 // GetTodayHourlyStats 从汇总表获取今日已完成小时的分时统计
-func (r *HourlyStatRepository) GetTodayHourlyStats() ([]HourlyStatsResult, error) {
+func (r *HourlyStatRepository) GetTodayHourlyStats() ([]model.HourlyStatsResult, error) {
 	today := time.Now().Truncate(24 * time.Hour)
 	var stats []model.HourlyStat
 	if err := r.db.Where("hour >= ? AND hour < ?", today, currentHourStart()).Find(&stats).Error; err != nil {
 		return nil, err
 	}
 
-	result := make([]HourlyStatsResult, len(stats))
+	result := make([]model.HourlyStatsResult, len(stats))
 	for i, s := range stats {
-		result[i] = HourlyStatsResult{
+		result[i] = model.HourlyStatsResult{
 			Hour:         s.Hour.Hour(),
 			RequestCount: s.RequestCount,
 			TotalTokens:  s.TotalTokens,
@@ -194,7 +184,7 @@ func (r *HourlyStatRepository) GetTodayHourlyStats() ([]HourlyStatsResult, error
 }
 
 // GetHourlyStatsByDate 获取指定日期的分时统计（历史日期从汇总表读取，今日追加当前小时实时数据）
-func (r *HourlyStatRepository) GetHourlyStatsByDate(date time.Time) ([]HourlyStatsResult, error) {
+func (r *HourlyStatRepository) GetHourlyStatsByDate(date time.Time) ([]model.HourlyStatsResult, error) {
 	dayStart := date.Truncate(24 * time.Hour)
 	dayEnd := dayStart.Add(24 * time.Hour)
 	now := time.Now()
@@ -214,9 +204,9 @@ func (r *HourlyStatRepository) GetHourlyStatsByDate(date time.Time) ([]HourlySta
 		return nil, err
 	}
 
-	result := make([]HourlyStatsResult, len(stats))
+	result := make([]model.HourlyStatsResult, len(stats))
 	for i, s := range stats {
-		result[i] = HourlyStatsResult{
+		result[i] = model.HourlyStatsResult{
 			Hour:         s.Hour.Hour(),
 			RequestCount: s.RequestCount,
 			TotalTokens:  s.TotalTokens,

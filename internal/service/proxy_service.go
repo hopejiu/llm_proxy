@@ -13,20 +13,18 @@ import (
 
 // ProxyService 代理服务
 type ProxyService struct {
-	providerRepo   *repository.ProviderRepository
-	requestLogRepo *repository.RequestLogRepository
-	cacheMu        sync.RWMutex
-	providerCache  []model.ProviderConfig
-	cacheExpiry    time.Time
-	cacheTTL       time.Duration
+	providerRepo  *repository.ProviderRepository
+	cacheMu       sync.RWMutex
+	providerCache []model.ProviderConfig
+	cacheExpiry   time.Time
+	cacheTTL      time.Duration
 }
 
 // NewProxyService 创建代理服务实例
-func NewProxyService(providerRepo *repository.ProviderRepository, requestLogRepo *repository.RequestLogRepository, cacheTTL time.Duration) *ProxyService {
+func NewProxyService(providerRepo *repository.ProviderRepository, cacheTTL time.Duration) *ProxyService {
 	return &ProxyService{
-		providerRepo:   providerRepo,
-		requestLogRepo: requestLogRepo,
-		cacheTTL:       cacheTTL,
+		providerRepo: providerRepo,
+		cacheTTL:    cacheTTL,
 	}
 }
 

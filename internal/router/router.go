@@ -3,6 +3,7 @@ package router
 import (
 	"llm-proxy/internal/handler"
 	"llm-proxy/internal/middleware"
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -20,6 +21,7 @@ func SetupWeb(h *handler.WebHandler) *gin.Engine {
 
 	r.GET("/", h.Index)
 	r.GET("/stats", h.StatsPage)
+	r.GET("/realtime", h.RealtimePage)
 
 	api := r.Group("/api")
 	{
@@ -38,6 +40,7 @@ func SetupWeb(h *handler.WebHandler) *gin.Engine {
 		api.GET("/stats/hourly", h.GetTodayHourlyStats)
 		api.GET("/logs/recent", h.GetRecentLogs)
 		api.GET("/logs/:id", h.GetLogDetail)
+		api.GET("/requests/active", h.GetActiveRequests)
 	}
 
 	return r
@@ -79,7 +82,7 @@ func StartServer(port string, engine *gin.Engine) *http.Server {
 
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			_ = err
+			slog.Error("HTTP服务启动失败", "addr", server.Addr, "error", err)
 		}
 	}()
 
