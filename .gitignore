@@ -22,3 +22,7 @@ Thumbs.db
 
 dist
 
+build/bin
+node_modules
+frontend/dist
+frontend/node_modules

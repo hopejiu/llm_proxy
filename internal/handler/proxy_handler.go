@@ -201,10 +201,15 @@ func (h *ProxyHandler) handleStreamRequestOpenAI(c *gin.Context, body []byte, pr
 	if lastErr != nil {
 		h.LogRequest(c, body, startTime, "FAILED", lastErr.Error(), provider)
 		c.SSEvent("error", gin.H{"error": lastErr.Error()})
+		c.Writer.Flush()
 		reqLog.ErrorMessage = lastErr.Error()
 		h.SaveRequestLog(reqLog)
 		return
 	}
+
+	// 确保发送 [DONE] 标记（某些上游可能不发送，导致客户端一直等待）
+	c.Writer.Write([]byte("data: [DONE]\n\n"))
+	c.Writer.Flush()
 
 	reqLog.ResponseBody = responseBuilder.String()
 	reqLog.ResponseContent = parseStreamResponse(responseBuilder.String())

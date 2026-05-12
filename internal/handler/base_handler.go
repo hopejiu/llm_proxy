@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"unicode/utf8"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -337,18 +338,47 @@ func (h *BaseHandler) ReadBody(c *gin.Context) ([]byte, error) {
 // maxBodySize 请求体/响应体存储的最大字节数（超过截断）
 const maxBodySize = 64 * 1024 // 64KB
 
-// truncateBody 截断过长的请求体/响应体
+// sanitizeBody 清理请求体/响应体，确保内容为合法 UTF-8
+func sanitizeBody(body string) string {
+	if body == "" {
+		return ""
+	}
+	// 转为 []byte 检查是否为合法 UTF-8
+	b := []byte(body)
+	if !utf8.Valid(b) {
+		// 替换无效 UTF-8 序列为 Unicode 替换字符
+		b = bytes.ToValidUTF8(b, []byte("\uFFFD"))
+	}
+	return string(b)
+}
+
+// truncateBody 截断过长的请求体/响应体（按 rune 截断，避免在多字节字符中间截断产生无效 UTF-8）
 func truncateBody(body string) string {
 	if len(body) <= maxBodySize {
 		return body
 	}
-	return body[:maxBodySize] + "\n...[truncated]"
+	// 按 rune 截断，确保不会在 UTF-8 多字节字符中间截断
+	runes := []rune(body)
+	if len(runes) == 0 {
+		return body[:maxBodySize] + "\n...[truncated]"
+	}
+	// 估算截断位置，逐步回退确保字节长度不超限
+	byteLimit := maxBodySize
+	truncated := string(runes[:len(runes)-1])
+	for len(truncated) > byteLimit && len(runes) > 1 {
+		runes = runes[:len(runes)-1]
+		truncated = string(runes[:len(runes)-1])
+	}
+	return truncated + "\n...[truncated]"
 }
 
-// SaveRequestLog 保存请求日志（自动截断过长的请求体/响应体）
+// SaveRequestLog 保存请求日志（清理无效 UTF-8，截断过长的请求体/响应体）
 func (h *BaseHandler) SaveRequestLog(reqLog *model.RequestLog) {
-	reqLog.RequestBody = truncateBody(reqLog.RequestBody)
-	reqLog.ResponseBody = truncateBody(reqLog.ResponseBody)
+	reqLog.RequestBody = sanitizeBody(truncateBody(reqLog.RequestBody))
+	reqLog.ResponseBody = sanitizeBody(truncateBody(reqLog.ResponseBody))
+	reqLog.ResponseContent = sanitizeBody(reqLog.ResponseContent)
+	reqLog.ThinkingContent = sanitizeBody(reqLog.ThinkingContent)
+	reqLog.ErrorMessage = sanitizeBody(reqLog.ErrorMessage)
 	if err := h.requestLogRepo.Create(reqLog); err != nil {
 		slog.Error("保存请求日志失败", "error", err)
 	}
@@ -458,7 +488,7 @@ type StreamError struct {
 	Message string      `json:"message"`
 }
 
-// readStreamWithFirstByteTimeout 读取流式响应，检测首次数据超时
+// readStreamWithFirstByteTimeout 读取流式响应，检测首次数据超时和流中途卡住
 // 返回: success(是否成功完成), timeout(是否因超时退出), err(错误信息)
 func (h *BaseHandler) readStreamWithFirstByteTimeout(
 	httpResp *http.Response,
@@ -467,22 +497,25 @@ func (h *BaseHandler) readStreamWithFirstByteTimeout(
 	processor StreamLineProcessor,
 	firstByteTimeout time.Duration,
 ) (success bool, timeout bool, err error) {
-	// 创建带超时的 context 用于检测首次数据
-	firstByteCtx, firstByteCancel := context.WithTimeout(context.Background(), firstByteTimeout)
-	defer firstByteCancel()
-
 	// 用于通知首次数据已到达
 	firstByteChan := make(chan struct{}, 1)
 	// 用于通知读取完成
 	doneChan := make(chan error, 1)
-	// 用于传递检测到的流式错误
-	streamErrChan := make(chan StreamError, 1)
+
+	// 创建可取消的 context，用于在超时时终止读取 goroutine
+	readCtx, readCancel := context.WithCancel(context.Background())
+	defer readCancel()
 
 	go func() {
 		scanner := bufio.NewScanner(httpResp.Body)
 		firstDataReceived := false
 
 		for scanner.Scan() {
+			// 检查是否被主 goroutine 取消（首字节超时场景）
+			if readCtx.Err() != nil {
+				return
+			}
+
 			line := scanner.Text()
 			if line == "" {
 				continue
@@ -515,10 +548,6 @@ func (h *BaseHandler) readStreamWithFirstByteTimeout(
 				if err := json.Unmarshal([]byte(data), &streamResp); err == nil {
 					// 检测流式响应中的错误
 					if streamErr := h.detectStreamError(streamResp); streamErr != nil {
-						select {
-						case streamErrChan <- *streamErr:
-						default:
-						}
 						doneChan <- fmt.Errorf("stream error: code=%v, message=%s", streamErr.Code, streamErr.Message)
 						return
 					}
@@ -551,28 +580,44 @@ func (h *BaseHandler) readStreamWithFirstByteTimeout(
 
 	// 等待首次数据或超时
 	firstByteStartTime := time.Now()
+	firstByteTimer := time.NewTimer(firstByteTimeout)
+	defer firstByteTimer.Stop()
+
 	select {
 	case <-firstByteChan:
 		// 首次数据已到达，继续等待读取完成
+		firstByteTimer.Stop()
 		slog.Debug("stream首次数据已到达", "wait_duration", time.Since(firstByteStartTime))
-	case <-firstByteCtx.Done():
-		// 首次数据超时
+	case <-firstByteTimer.C:
+		// 首次数据超时，取消读取 goroutine
+		readCancel()
 		slog.Warn("stream首次数据等待超时", "timeout", firstByteTimeout, "waited", time.Since(firstByteStartTime))
 		return false, true, nil
 	}
 
-	// 等待读取完成
+	// 等待读取完成，带整体超时保护（防止流中途卡住无限阻塞）
 	readStartTime := time.Now()
-	err = <-doneChan
-	readDuration := time.Since(readStartTime)
+	// 流中途卡住超时：使用 HTTPTimeout 作为整体上限
+	stallTimeout := h.config.HTTPTimeout
+	stallTimer := time.NewTimer(stallTimeout)
+	defer stallTimer.Stop()
 
-	if err == nil {
-		slog.Debug("stream读取完成", "read_duration", readDuration)
-	} else {
-		slog.Debug("stream读取出错", "read_duration", readDuration, "error", err)
+	select {
+	case err = <-doneChan:
+		stallTimer.Stop()
+		readDuration := time.Since(readStartTime)
+		if err == nil {
+			slog.Debug("stream读取完成", "read_duration", readDuration)
+		} else {
+			slog.Debug("stream读取出错", "read_duration", readDuration, "error", err)
+		}
+		return err == nil, false, err
+	case <-stallTimer.C:
+		// 流中途卡住超时，取消读取 goroutine
+		readCancel()
+		slog.Warn("stream中途卡住超时", "timeout", stallTimeout, "waited", time.Since(readStartTime))
+		return false, false, fmt.Errorf("stream stalled: no data received for %v", stallTimeout)
 	}
-
-	return err == nil, false, err
 }
 
 // detectStreamError 检测流式响应中的错误

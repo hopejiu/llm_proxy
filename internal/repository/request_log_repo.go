@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"database/sql"
 	"fmt"
 	"llm-proxy/internal/model"
 	"log/slog"
@@ -233,17 +234,18 @@ func (r *RequestLogRepository) GetHourlyStatsByDateFromLogs(date time.Time) ([]m
 
 // GetMinCreatedAt 获取最早记录的创建时间（用于回填起始点）
 func (r *RequestLogRepository) GetMinCreatedAt() (*time.Time, error) {
-	var minTime time.Time
+	var nullTime sql.NullTime
 	err := r.db.Model(&model.RequestLog{}).
 		Select("MIN(created_at)").
-		Scan(&minTime).Error
+		Scan(&nullTime).Error
 	if err != nil {
 		return nil, err
 	}
-	if minTime.IsZero() {
+	if !nullTime.Valid {
 		return nil, nil
 	}
-	return &minTime, nil
+	t := nullTime.Time
+	return &t, nil
 }
 
 // DeleteOldRequestLogs 删除超过保留天数的明细记录

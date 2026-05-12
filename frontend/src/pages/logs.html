@@ -1,0 +1,30 @@
+<!-- 运行日志页面 -->
+<div class="page-header animate-fade-in">
+    <div>
+        <h1>运行日志</h1>
+        <p class="text-gray-500 mt-1">应用运行日志实时流</p>
+    </div>
+</div>
+
+<div class="log-viewer animate-fade-in">
+    <div class="log-viewer-header">
+        <div class="log-viewer-controls">
+            <select id="logLevelFilter" onchange="filterLogs()" class="log-filter-select">
+                <option value="all">全部级别</option>
+                <option value="debug">DEBUG</option>
+                <option value="info">INFO</option>
+                <option value="warn">WARN</option>
+                <option value="error">ERROR</option>
+            </select>
+            <input type="text" id="logSearchInput" oninput="filterLogs()" placeholder="搜索关键词..." class="log-search-input">
+            <button id="logPauseBtn" onclick="togglePause()" class="log-action-btn" title="暂停/继续">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            </button>
+            <button onclick="clearLogs()" class="log-action-btn" title="清屏">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            </button>
+        </div>
+        <span class="text-xs text-gray-400" id="logCount">0 条日志</span>
+    </div>
+    <div class="log-viewer-body" id="logViewerBody"></div>
+</div>

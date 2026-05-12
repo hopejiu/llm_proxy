@@ -163,6 +163,10 @@ func (h *AnthropicHandler) handleStreamMessages(c *gin.Context, body []byte, sta
 		return
 	}
 
+	// 确保发送 [DONE] 标记（某些上游可能不发送，导致客户端一直等待）
+	c.Writer.Write([]byte("data: [DONE]\n\n"))
+	c.Writer.Flush()
+
 	// 如果流结束时没有收到 finish_reason，补发结束事件
 	state.finalize(&tokens)
 

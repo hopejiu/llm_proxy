@@ -1,0 +1,97 @@
+<!-- 活跃请求概览 -->
+<div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8 animate-fade-in">
+    <div class="stats-card">
+        <div class="flex items-center justify-between mb-4">
+            <span class="text-sm font-medium text-gray-500">活跃请求</span>
+            <span class="tag tag-primary">Active</span>
+        </div>
+        <div class="flex items-baseline">
+            <div class="stats-number" id="activeCount">0</div>
+            <span class="stats-unit">个请求</span>
+        </div>
+        <div class="mt-4 text-sm">
+            <span class="text-gray-400">其中流式</span>
+            <p class="font-semibold text-gray-700" id="streamingCount">0</p>
+        </div>
+    </div>
+    <div class="stats-card">
+        <div class="flex items-center justify-between mb-4">
+            <span class="text-sm font-medium text-gray-500">最近完成</span>
+            <span class="tag tag-success">Recent</span>
+        </div>
+        <div class="flex items-baseline">
+            <div class="stats-number" id="recentCount">0</div>
+            <span class="stats-unit">条记录</span>
+        </div>
+        <div class="mt-4 text-sm">
+            <span class="text-gray-400">成功率</span>
+            <p class="font-semibold text-green-600" id="successRate">-</p>
+        </div>
+    </div>
+    <div class="stats-card">
+        <div class="flex items-center justify-between mb-4">
+            <span class="text-sm font-medium text-gray-500">输出速率</span>
+            <span class="tag tag-primary">Speed</span>
+        </div>
+        <div class="flex items-baseline">
+            <div class="stats-number" id="tokensPerSec">-</div>
+            <span class="stats-unit">Token/s</span>
+        </div>
+        <div class="mt-4 text-sm"><span class="text-gray-400">基于最近成功请求</span></div>
+    </div>
+    <div class="stats-card">
+        <div class="flex items-center justify-between mb-4">
+            <span class="text-sm font-medium text-gray-500">刷新间隔</span>
+            <span class="tag tag-primary">Interval</span>
+        </div>
+        <div class="flex items-baseline">
+            <div class="stats-number" id="intervalDisplay">2</div>
+            <span class="stats-unit">秒</span>
+        </div>
+        <div class="mt-4 text-sm flex items-center gap-2">
+            <select id="intervalSelect" onchange="changeInterval()" class="form-input" style="width: auto; padding: 6px 12px; font-size: 13px;">
+                <option value="1">1秒</option>
+                <option value="2" selected>2秒</option>
+                <option value="3">3秒</option>
+                <option value="5">5秒</option>
+                <option value="10">10秒</option>
+            </select>
+        </div>
+    </div>
+</div>
+
+<!-- 活跃请求列表 -->
+<div class="card p-6 mb-8 animate-fade-in" style="animation-delay: 0.05s;">
+    <div class="flex justify-between items-center mb-4">
+        <h2 class="text-lg font-bold text-gray-800">
+            <span class="inline-flex items-center gap-2"><span class="pulse-dot"></span>正在进行的请求</span>
+        </h2>
+        <div class="flex items-center gap-3">
+            <span class="text-sm text-gray-500" id="activeUpdateTime">-</span>
+            <button id="refreshBtn" class="refresh-btn" onclick="refreshAll()" title="刷新数据">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+            </button>
+            <div class="flex items-center space-x-2 text-sm">
+                <span class="text-gray-500">自动刷新</span>
+                <label class="toggle"><input type="checkbox" id="autoRefreshSwitch" checked onchange="toggleAutoRefresh()"><span class="toggle-slider"></span></label>
+            </div>
+        </div>
+    </div>
+    <div id="activeRequestsContainer">
+        <div class="empty-state"><svg class="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg><p>当前没有活跃请求</p></div>
+    </div>
+</div>
+
+<!-- 最近完成的请求 -->
+<div class="card p-6 animate-fade-in" style="animation-delay: 0.1s;">
+    <div class="flex justify-between items-center mb-4">
+        <h2 class="text-lg font-bold text-gray-800">最近完成的请求</h2>
+        <span class="text-sm text-gray-500" id="recentUpdateTime">-</span>
+    </div>
+    <div class="table-container">
+        <table>
+            <thead><tr><th>时间</th><th>Provider</th><th>模型</th><th>Input</th><th>Output</th><th>Cached</th><th>Total</th><th>耗时</th><th>状态</th><th>操作</th></tr></thead>
+            <tbody id="recentLogsBody"></tbody>
+        </table>
+    </div>
+</div>

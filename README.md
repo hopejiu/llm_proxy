@@ -2,24 +2,26 @@
 
 ## 项目简介
 
-LLM Proxy 是一个轻量级的大语言模型（LLM）API 中转代理服务，同时提供 **OpenAI**、**Anthropic**、**Ollama** 三种兼容接口，支持多服务商管理、模型别名路由、请求日志记录和 Token 使用统计。通过 Web 界面可视化管理 Provider 配置，实现一键切换不同的 LLM 服务商。
+LLM Proxy 是一个轻量级的大语言模型（LLM）API 中转代理服务，基于 **Wails** 构建为 Windows 桌面应用，同时提供 **OpenAI**、**Anthropic**、**Ollama** 三种兼容接口，支持多服务商管理、模型别名路由、请求日志记录和 Token 使用统计。通过桌面界面可视化管理 Provider 配置，实现一键切换不同的 LLM 服务商。
 
 ## 核心功能
 
+- **桌面应用**：基于 Wails 构建的 Windows 原生桌面应用，内置 WebView2 前端界面，无需浏览器即可管理
 - **多协议兼容代理**：同时提供 OpenAI、Anthropic、Ollama 三种 API 接口，无缝对接各类应用
-- **多服务商管理**：支持配置多个 LLM 服务商（如 DeepSeek、OpenAI、Claude 等），一键切换激活
+- **多服务商管理**：支持配置多个 LLM 服务商（如 DeepSeek、OpenAI、Claude 等），按模型名自动路由
 - **模型别名路由**：支持为 Provider 设置别名，请求时按模型名自动路由到对应 Provider
 - **自动模型替换**：代理请求时自动将请求体中的 model 替换为当前激活服务商的模型
 - **自定义请求参数**：支持通过 ExtraParams 注入额外请求参数（如 temperature、max_tokens 等）
 - **流式/非流式支持**：完整支持 SSE 流式响应和非流式响应，流式自动注入 `stream_options` 确保 usage 返回
+- **流式超时保护**：首字节超时检测 + 流中途卡住超时检测，自动重试，防止请求挂起
 - **请求日志记录**：详细记录每次请求的输入输出 Token、缓存 Token、推理内容、响应内容、耗时等
+- **实时请求监控**：实时查看活跃请求列表，包括请求状态、已返回内容、工具调用等
 - **统计报表**：提供 30 天 Token 使用趋势、今日分时统计、请求统计等可视化报表
-- **统计体验优化**：骨架屏加载、错误 Toast 提示、环比趋势指标、图表维度切换、日志详情元信息、手动刷新等
 - **Provider 导入导出**：支持 JSON 格式批量导入导出 Provider 配置
 - **CodeBuddy 集成**：一键配置 CodeBuddy 的 models.json，快速接入代理服务
 - **双数据库支持**：支持 MySQL 和 SQLite，SQLite 模式零依赖开箱即用
 - **数据自动清理**：自动汇总和清理过期请求记录，汇总表永久保留统计数据
-- **性能优化**：SQLite WAL 模式、数据库索引、汇总表加速统计查询
+- **运行日志查看**：应用内实时查看运行日志，支持日志级别过滤
 
 ## 适用场景
 
@@ -35,22 +37,17 @@ LLM Proxy 是一个轻量级的大语言模型（LLM）API 中转代理服务，
 
 ### 操作系统
 
-- Windows 10/11
-- macOS 10.15+
-- Linux (Ubuntu 18.04+, CentOS 7+)
+- Windows 10/11（当前主要支持平台）
 
 ### 编程语言
 
 - **Go**: 1.25+
+- **Node.js**: 16+（前端构建所需）
 
 ### 数据库（二选一）
 
 - **MySQL**: 5.7+ 或 8.0+
 - **SQLite**: 无需额外安装（默认使用 MySQL，通过 `DB_TYPE=sqlite` 切换）
-
-### 浏览器
-
-- Chrome、Firefox、Edge 等现代浏览器（用于访问 Web 管理界面）
 
 ---
 
@@ -58,13 +55,20 @@ LLM Proxy 是一个轻量级的大语言模型（LLM）API 中转代理服务，
 
 ### 核心依赖
 
-| 依赖库                     | 版本    | 说明                          |
-| -------------------------- | ------- | ----------------------------- |
-| github.com/gin-gonic/gin   | v1.12.0 | Web 框架                      |
-| gorm.io/gorm               | v1.31.1 | ORM 框架                      |
-| gorm.io/driver/mysql       | v1.6.0  | MySQL 驱动                    |
-| github.com/glebarez/sqlite | v1.11.0 | 纯 Go SQLite 驱动（无需 CGO） |
-| github.com/joho/godotenv   | v1.5.1  | .env 文件加载                 |
+| 依赖库                       | 版本      | 说明                            |
+| ---------------------------- | --------- | ------------------------------- |
+| github.com/wailsapp/wails/v2 | v2.12.0   | 桌面应用框架（Go + WebView2）   |
+| github.com/gin-gonic/gin     | v1.12.0   | HTTP 框架（代理服务路由）       |
+| gorm.io/gorm                 | v1.31.1   | ORM 框架                        |
+| gorm.io/driver/mysql         | v1.6.0    | MySQL 驱动                      |
+| github.com/gleberez/sqlite   | v1.11.0   | 纯 Go SQLite 驱动（无需 CGO）   |
+| github.com/joho/godotenv     | v1.5.1    | .env 文件加载                   |
+
+### 前端
+
+| 依赖库   | 版本    | 说明          |
+| -------- | ------- | ------------- |
+| Vite     | ^3.0.7  | 前端构建工具  |
 
 ---
 
@@ -77,15 +81,19 @@ git clone <repository-url>
 cd llm_statistic
 ```
 
-bash### 安装依赖
+### 安装依赖
 
 ```bash
+# Go 依赖
 go mod download
+
+# 前端依赖
+cd frontend && npm install && cd ..
 ```
 
-bash### 配置环境变量
+### 配置环境变量
 
-创建 `.env` 文件或设置环境变量：
+在 `%APPDATA%/llm-proxy/` 目录下创建 `.env` 文件，或在工作目录下创建：
 
 **MySQL 模式（默认）：**
 
@@ -98,34 +106,36 @@ DB_PASSWORD=your_password
 DB_NAME=llm_proxy
 ```
 
-bash**SQLite 模式（零依赖）：**
+**SQLite 模式（零依赖）：**
 
 ```bash
 DB_TYPE=sqlite
 DB_PATH=llm_proxy.db
 ```
 
-bash### 编译运行
+### 开发模式运行
 
 ```bash
-# 编译
-go build -o server.exe ./cmd/server
-
-# 运行
-./server.exe
+wails dev
 ```
 
-bash或直接运行：
+### 构建发布
 
 ```bash
-go run ./cmd/server
+# 使用构建脚本（推荐）
+.\build.ps1
+
+# 或直接使用 Wails CLI
+wails build -ldflags="-s -w"
 ```
 
-bash---
+构建产物输出到 `dist/` 目录，包含 `llm-proxy.exe` 可执行文件。
+
+---
 
 ## 自动构建
 
-项目使用 GitHub Actions 实现自动编译和发布。当推送 `v*` 格式的 tag 时，会自动构建 Windows 和 Linux 二进制文件并发布到 GitHub Release。
+项目使用 GitHub Actions 实现自动编译和发布。当推送 `v*` 格式的 tag 时，会自动构建 Windows 二进制文件并发布到 GitHub Release。
 
 ### 触发方式
 
@@ -133,15 +143,6 @@ bash---
 git tag v1.0.0
 git push origin v1.0.0
 ```
-
-bash### 构建产物
-
-| 平台    | 架构  | 文件名                           |
-| ------- | ----- | -------------------------------- |
-| Windows | amd64 | `llm-proxy-windows-amd64.zip`  |
-| Linux   | amd64 | `llm-proxy-linux-amd64.tar.gz` |
-
-压缩包内包含二进制文件和 `web` 目录，解压后即可运行。
 
 ---
 
@@ -158,7 +159,6 @@ bash### 构建产物
 | DBUser                 | `DB_USER`                   | `root`         | MySQL 用户名               |
 | DBPassword             | `DB_PASSWORD`               | （空）           | MySQL 密码                 |
 | DBName                 | `DB_NAME`                   | `llm_proxy`    | 数据库名                   |
-| WebPort                | `WEB_PORT`                  | `80`           | Web 管理界面端口           |
 | ProxyPort              | `PROXY_PORT`                | `8888`         | 代理服务端口               |
 | HTTPTimeout            | `HTTP_TIMEOUT`              | `300s`         | HTTP 请求超时              |
 | StreamFirstByteTimeout | `STREAM_FIRST_BYTE_TIMEOUT` | `5s`           | 流式首次数据超时           |
@@ -166,10 +166,12 @@ bash### 构建产物
 | RetryDelayBase         | `RETRY_DELAY_BASE`          | `500ms`        | 重试延迟基数               |
 | ProviderCacheTTL       | `PROVIDER_CACHE_TTL`        | `30s`          | Provider 缓存过期时间      |
 | LogCleanupDays         | `LOG_CLEANUP_DAYS`          | `14`           | 日志清理天数               |
+| LogLevel               | `LOG_LEVEL`                 | `info`         | 日志级别（debug/info/warn/error） |
+| AutoStartProxy         | `AUTO_START_PROXY`          | `true`         | 启动时是否自动启动代理服务 |
 
 ### 环境变量优先级
 
-程序会优先读取环境变量，若未设置则使用默认值。支持 `.env` 文件。
+程序会优先读取环境变量，若未设置则使用默认值。`.env` 文件从 `%APPDATA%/llm-proxy/.env` 和当前工作目录加载，环境变量优先于 `.env` 文件。
 
 ---
 
@@ -177,18 +179,12 @@ bash### 构建产物
 
 ### 启动服务
 
-启动后会自动打开浏览器访问管理界面：
+启动桌面应用后，可在界面中点击「启动代理」按钮启动代理服务（默认自动启动）。
 
-```
-http://localhost
-```
-
-language### 访问地址
+### 访问地址
 
 | 服务               | 地址                                            |
 | ------------------ | ----------------------------------------------- |
-| 管理界面           | `http://localhost`                            |
-| 统计报表           | `http://localhost/stats`                      |
 | OpenAI 代理        | `http://localhost:8888/v1/chat/completions`   |
 | OpenAI 模型列表    | `http://localhost:8888/v1/models`             |
 | Anthropic 代理     | `http://localhost:8888/anthropic/v1/messages` |
@@ -199,7 +195,7 @@ language### 访问地址
 
 ### 添加 Provider
 
-- 点击右上角「添加配置」按钮
+- 在「Provider 管理」页面点击「添加配置」按钮
 - 填写配置信息：
   - **名称**：服务商标识名称（如 DeepSeek）
   - **Base URL**：API 端点地址（如 `https://api.deepseek.com/v1/chat/completions`）
@@ -209,12 +205,6 @@ language### 访问地址
   - **自动后缀**：开启后可配置 URL 后缀，自动拼接到 Base URL
   - **额外参数**：自定义请求参数 JSON，会合并到请求体中
 - 点击「保存」
-
-### 切换激活模型
-
-- 在 Provider 列表中，点击目标配置的开关即可激活
-- 系统保证同一时间只有一个 Provider 处于激活状态
-- 激活新的 Provider 会自动禁用其他所有 Provider
 
 ### 调用代理接口
 
@@ -235,7 +225,7 @@ response = client.chat.completions.create(
 )
 ```
 
-python**Anthropic 兼容：**
+**Anthropic 兼容：**
 
 ```python
 import anthropic
@@ -252,7 +242,7 @@ response = client.messages.create(
 )
 ```
 
-python**Ollama 兼容：**
+**Ollama 兼容：**
 
 ```bash
 curl http://localhost:8888/api/chat -d '{
@@ -261,46 +251,42 @@ curl http://localhost:8888/api/chat -d '{
 }'
 ```
 
-bash### 查看统计
-
-访问 `http://localhost/stats` 查看：
-
-- 概览卡片：今日/本周/总计 Token 用量，含环比趋势指标和 Tokens 单位标注
-- 30 天趋势图：支持 Token 用量/请求数维度切换
-- 今日分时统计：仅显示到当前小时，避免未来空白噪音
-- 最近请求日志：点击可查看完整详情（含时间、模型、Provider、耗时、Token/s 等元信息）
-- 手动刷新按钮：一键刷新所有数据，带旋转动画反馈
-
 ---
 
 ## 项目结构
 
 ```
 llm_statistic/
-├── cmd/
-│   └── server/
-│       └── main.go              # 程序入口
+├── main.go                      # 程序入口（Wails 应用）
+├── app.go                       # App 核心逻辑（Wails 绑定层）
+├── app_error.go                 # 统一错误类型
+├── vo.go                        # 视图对象（前端数据转换）
 ├── internal/
 │   ├── config/
-│   │   └── config.go            # 配置管理
+│   │   └── config.go            # 配置管理（.env 加载、校验、持久化）
 │   ├── converter/
 │   │   ├── anthropic_converter.go  # Anthropic <-> OpenAI 协议转换
 │   │   ├── ollama_converter.go     # Ollama <-> OpenAI 协议转换
 │   │   ├── openai_types.go         # OpenAI 类型定义
 │   │   └── usage.go                # Token 用量提取
 │   ├── handler/
-│   │   ├── base_handler.go      # 公共基类 Handler
+│   │   ├── base_handler.go      # 公共基类 Handler（流式超时、重试、日志）
 │   │   ├── proxy_handler.go     # OpenAI 兼容代理
 │   │   ├── anthropic_handler.go # Anthropic 兼容代理
+│   │   ├── anthropic_stream.go  # Anthropic 流式状态机
 │   │   ├── ollama_handler.go    # Ollama 兼容代理
-│   │   ├── web_handler.go       # Web 管理 API
+│   │   ├── active_tracker.go   # 活跃请求追踪器
+│   │   ├── stream_tracker.go   # 流式内容追踪（工具调用等）
+│   │   ├── web_handler.go      # Web 管理 API
 │   │   └── response.go          # 统一响应格式
 │   ├── logger/
-│   │   └── logger.go            # 日志初始化
+│   │   ├── logger.go            # 日志初始化
+│   │   ├── handler.go           # slog Handler（文件 + RingBuffer）
+│   │   └── ringbuffer.go        # 环形缓冲区（实时日志推送）
 │   ├── middleware/
 │   │   └── cors.go              # CORS 中间件
 │   ├── model/
-│   │   ├── models.go            # 核心模型（ProviderConfig, RequestLog, TokenStats, HourlyStat）
+│   │   ├── models.go            # 核心模型（ProviderConfig, RequestLog, HourlyStat）
 │   │   ├── anthropic_models.go  # Anthropic 请求/响应模型
 │   │   └── ollama_models.go     # Ollama 请求/响应模型
 │   ├── repository/
@@ -308,60 +294,40 @@ llm_statistic/
 │   │   ├── request_log_repo.go  # 日志数据访问 + 统计查询
 │   │   └── hourly_stat_repo.go  # 汇总表数据访问 + 汇总统计查询
 │   ├── router/
-│   │   └── router.go            # 路由定义
+│   │   └── router.go            # 代理服务路由定义
 │   └── service/
 │       ├── proxy_service.go     # 代理核心逻辑 + Provider 缓存
 │       ├── provider_service.go  # Provider 管理
 │       ├── stats_service.go     # 统计服务（汇总表+明细表混合查询）
 │       └── cleanup_service.go   # 定时汇总和清理服务
-├── web/
-│   ├── static/
-│   │   ├── css/
-│   │   │   └── style.css          # 全局样式（含骨架屏、趋势指标、维度切换等）
-│   │   └── js/
-│   │       ├── common.js          # 公共工具函数
-│   │       ├── stats.js           # 统计页面逻辑
-│   │       └── echarts.min.js     # ECharts 图表库
-│   └── templates/
-│       ├── index.html             # 配置管理页面
-│       └── stats.html             # 统计报表页面
-├── .github/workflows/
-│   └── release.yml              # GitHub Actions 自动发布
+├── frontend/
+│   ├── src/
+│   │   ├── main.js              # 前端入口
+│   │   ├── common.js            # 公共工具函数
+│   │   ├── style.css            # 全局样式
+│   │   ├── pages/
+│   │   │   ├── providers.html/js  # Provider 管理页面
+│   │   │   ├── stats.html/js      # 统计报表页面
+│   │   │   ├── logs.html/js       # 请求日志页面
+│   │   │   ├── realtime.html/js   # 实时监控页面
+│   │   │   └── settings.html/js   # 设置页面
+│   │   ├── lib/                 # 第三方库
+│   │   └── assets/              # 静态资源
+│   ├── index.html               # Vite 入口
+│   └── package.json
 ├── build.ps1                    # Windows 构建脚本
 ├── build.sh                     # Linux 构建脚本
+├── wails.json                   # Wails 配置
+├── .github/workflows/
+│   └── release.yml              # GitHub Actions 自动发布
 ├── go.mod
 ├── go.sum
 └── README.md
 ```
 
-language---
+---
 
-## API 接口
-
-### Provider 管理
-
-| 方法   | 路径                  | 说明                   |
-| ------ | --------------------- | ---------------------- |
-| GET    | /api/providers        | 获取所有 Provider      |
-| GET    | /api/providers/:id    | 获取单个 Provider      |
-| POST   | /api/providers        | 创建 Provider          |
-| PUT    | /api/providers/:id    | 更新 Provider          |
-| DELETE | /api/providers/:id    | 删除 Provider          |
-| GET    | /api/providers/export | 导出所有 Provider 配置 |
-| POST   | /api/providers/import | 导入 Provider 配置     |
-| POST   | /api/codebuddy/setup  | 一键配置 CodeBuddy     |
-
-### 统计接口
-
-| 方法 | 路径              | 说明             |
-| ---- | ----------------- | ---------------- |
-| GET  | /api/stats        | 获取仪表盘统计   |
-| GET  | /api/stats/daily  | 获取 30 天统计   |
-| GET  | /api/stats/hourly | 获取今日分时统计 |
-| GET  | /api/logs/recent  | 获取最近日志     |
-| GET  | /api/logs/:id     | 获取日志详情     |
-
-### 代理接口
+## 代理接口
 
 | 方法 | 路径                   | 说明                    |
 | ---- | ---------------------- | ----------------------- |
@@ -375,15 +341,29 @@ language---
 
 ---
 
+## 流式请求可靠性
+
+代理服务对流式请求提供了多层保护机制：
+
+| 机制                 | 说明                                                                 |
+| -------------------- | -------------------------------------------------------------------- |
+| 首字节超时检测       | 连接建立后若在 `STREAM_FIRST_BYTE_TIMEOUT` 内未收到首字节，自动重试 |
+| 流中途卡住超时       | 流数据传输中若长时间无新数据（超过 `HTTP_TIMEOUT`），终止请求并报错  |
+| 自动重试             | 首字节超时或请求失败时，按指数退避重试，最多 `STREAM_MAX_RETRIES` 次 |
+| [DONE] 保证          | 流结束时确保向客户端发送 `data: [DONE]` 标记，防止客户端挂起等待     |
+| goroutine 泄漏防护   | 超时时通过 context cancel 终止读取 goroutine，避免资源泄漏            |
+
+---
+
 ## 日志文件
 
-程序运行时会生成以下日志文件：
+程序运行时在 `%APPDATA%/llm-proxy/` 目录下生成以下文件：
 
 | 文件               | 说明         |
 | ------------------ | ------------ |
 | llm-proxy.log      | 服务运行日志 |
-| proxy-requests.log | 代理请求日志 |
-| proxy-reqbody.log  | 请求体日志   |
+| llm_proxy.db       | SQLite 数据库（SQLite 模式） |
+| .env               | 配置文件     |
 
 日志文件会自动清理超过 `LOG_CLEANUP_DAYS` 天的记录。
 
@@ -403,15 +383,22 @@ language---
 
 ### Q: 端口被占用？
 
-修改环境变量 `WEB_PORT` 和 `PROXY_PORT` 为其他端口。
+修改环境变量 `PROXY_PORT` 为其他端口。
 
 ### Q: 如何查看详细错误？
 
-查看 `llm-proxy.log` 日志文件获取详细错误信息。
+- 应用内「设置」页面查看运行日志
+- 或查看 `%APPDATA%/llm-proxy/llm-proxy.log` 日志文件
 
 ### Q: 如何使用 SQLite？
 
 设置环境变量 `DB_TYPE=sqlite`，可选配置 `DB_PATH` 指定数据库文件路径，默认为 `llm_proxy.db`。
+
+### Q: 流式请求卡住不返回？
+
+- 检查 `STREAM_FIRST_BYTE_TIMEOUT` 是否过短（默认 5s）
+- 检查 `HTTP_TIMEOUT` 是否足够（默认 300s，即 5 分钟）
+- 查看日志中是否有 "stream首次数据等待超时" 或 "stream中途卡住超时" 的警告
 
 ---
 
@@ -448,12 +435,6 @@ language---
 | idx_request_logs_created_at_status | (created_at, status) | 统计查询、清理操作      |
 | idx_request_logs_created_at        | (created_at)         | 排序、范围查询          |
 | idx_request_logs_provider_id       | (provider_id)        | Provider 删除时关联更新 |
-
-### 查询优化
-
-- `GetRecent` 排除 longtext 大字段，只查询摘要信息
-- `GetDashboardStats` 从汇总表一次查询获取今日/本周/总计
-- 日志详情通过 `GetByID` 单独获取完整数据
 
 ### 定时清理
 

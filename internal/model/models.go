@@ -11,14 +11,14 @@ const DeletedProviderID uint = 999
 // ProviderConfig 第三方LLM服务商配置
 type ProviderConfig struct {
 	ID          uint      `json:"id" gorm:"primaryKey"`
-	Name        string    `json:"name" gorm:"size:100;not null;type:varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"`
+	Name        string    `json:"name" gorm:"size:100;not null"`
 	AutoSuffix  bool      `json:"auto_suffix" gorm:"default:false"`
-	UrlSuffix   string    `json:"url_suffix" gorm:"size:200;default:'';type:varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"`
-	BaseURL     string    `json:"base_url" gorm:"size:500;not null;type:varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"`
-	APIKey      string    `json:"api_key" gorm:"size:500;not null;type:varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"`
-	Model       string    `json:"model" gorm:"size:100;type:varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"`
-	Alias       string    `json:"alias" gorm:"size:200;type:varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"`
-	ExtraParams string    `json:"extra_params" gorm:"type:text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"`
+	UrlSuffix   string    `json:"url_suffix" gorm:"size:200;default:''"`
+	BaseURL     string    `json:"base_url" gorm:"size:500;not null"`
+	APIKey      string    `json:"api_key" gorm:"size:500;not null"`
+	Model       string    `json:"model" gorm:"size:100"`
+	Alias       string    `json:"alias" gorm:"size:200"`
+	ExtraParams string    `json:"extra_params" gorm:"type:text"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -72,17 +72,17 @@ type RequestLog struct {
 	ID              uint           `json:"id" gorm:"primaryKey"`
 	ProviderID      uint           `json:"provider_id" gorm:"index:idx_provider_id"`
 	Provider        ProviderConfig `json:"provider" gorm:"-"` // 不再使用外键关联，手动处理
-	Model           string         `json:"model" gorm:"size:100;type:varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"`
+	Model           string         `json:"model" gorm:"size:100"`
 	InputTokens     int            `json:"input_tokens"`
 	OutputTokens    int            `json:"output_tokens"`
 	TotalTokens     int            `json:"total_tokens"`
 	CachedTokens    int            `json:"cached_tokens"`                // 缓存token数
-	RequestBody     string         `json:"request_body" gorm:"type:longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"`     // 完整请求JSON
-	ResponseBody    string         `json:"response_body" gorm:"type:longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"`    // 完整响应JSON
-	ResponseContent string         `json:"response_content" gorm:"type:longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"` // 解析后的可读响应内容（stream类型拼接后的完整内容）
-	ThinkingContent string         `json:"thinking_content" gorm:"type:longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"` // 推理/thinking内容
-	Status          string         `json:"status" gorm:"size:20;type:varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;index:idx_created_at_status"` // success/error
-	ErrorMessage    string         `json:"error_message" gorm:"size:1000;type:varchar(1000) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"`
+	RequestBody     string         `json:"request_body" gorm:"type:longtext"`     // 完整请求JSON
+	ResponseBody    string         `json:"response_body" gorm:"type:longtext"`    // 完整响应JSON
+	ResponseContent string         `json:"response_content" gorm:"type:longtext"` // 解析后的可读响应内容（stream类型拼接后的完整内容）
+	ThinkingContent string         `json:"thinking_content" gorm:"type:longtext"` // 推理/thinking内容
+	Status          string         `json:"status" gorm:"size:20;index:idx_created_at_status"` // success/error
+	ErrorMessage    string         `json:"error_message" gorm:"size:1000"`
 	Duration        int64          `json:"duration"` // 请求耗时(毫秒)
 	Aggregated      bool           `json:"aggregated" gorm:"default:false;index:idx_aggregated"` // 是否已汇总到hourly_stats
 	CreatedAt       time.Time      `json:"created_at" gorm:"index:idx_created_at;index:idx_created_at_status"`

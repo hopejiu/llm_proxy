@@ -1,0 +1,133 @@
+<!-- 操作栏 -->
+<div class="page-header animate-fade-in">
+    <div>
+        <h1>Provider 配置</h1>
+        <p class="text-gray-500 mt-1">管理第三方 LLM 服务商接口</p>
+    </div>
+    <div class="flex items-center space-x-3">
+        <button onclick="setupCodeBuddy()" class="btn-secondary flex items-center space-x-2" title="配置 CodeBuddy models.json">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+            </svg>
+            <span>配置CodeBuddy</span>
+        </button>
+        <button onclick="exportProviders()" class="btn-secondary flex items-center space-x-2">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+            </svg>
+            <span>导出</span>
+        </button>
+        <button onclick="importProviders()" class="btn-secondary flex items-center space-x-2">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+            </svg>
+            <span>导入</span>
+        </button>
+        <button onclick="openModal()" class="btn-primary flex items-center space-x-2">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+            </svg>
+            <span>添加配置</span>
+        </button>
+    </div>
+</div>
+
+<!-- Provider 列表 -->
+<div id="providerList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+
+<!-- 空状态 -->
+<div id="emptyState" class="hidden text-center py-16">
+    <div class="w-24 h-24 mx-auto mb-4 bg-purple-100 rounded-full flex items-center justify-center">
+        <svg class="w-12 h-12 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+        </svg>
+    </div>
+    <h3 class="text-lg font-medium text-gray-900 mb-2">暂无配置</h3>
+    <p class="text-gray-500 mb-4">点击上方按钮添加第一个 Provider 配置</p>
+</div>
+
+<!-- 配置模态框 -->
+<div id="providerModal" class="modal-overlay">
+    <div class="modal-content p-6">
+        <div class="flex justify-between items-center mb-6">
+            <h2 id="modalTitle" class="text-xl font-bold text-gray-800">添加配置</h2>
+            <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 transition-colors">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+            </button>
+        </div>
+        <form id="providerForm" onsubmit="saveProvider(event)">
+            <input type="hidden" id="providerId">
+            <div class="space-y-4">
+                <div>
+                    <label class="form-label">名称</label>
+                    <input type="text" id="name" class="form-input" placeholder="例如：DeepSeek" required>
+                </div>
+                <div>
+                    <label class="form-label">Base URL</label>
+                    <input type="url" id="baseURL" class="form-input" placeholder="https://api.example.com" oninput="updateUrlPreview()" required>
+                    <div class="flex items-center space-x-2 mt-2">
+                        <input type="checkbox" id="autoSuffix" checked onchange="onAutoSuffixChange()" class="w-4 h-4 text-purple-600 rounded border-gray-300 focus:ring-purple-500">
+                        <label for="autoSuffix" class="text-sm text-gray-600">自动拼接后缀</label>
+                    </div>
+                    <div id="suffixSection" class="mt-2">
+                        <label class="text-sm text-gray-500">URL 后缀</label>
+                        <input type="text" id="urlSuffix" class="form-input text-sm mt-1" value="/v1/chat/completions" oninput="updateUrlPreview()">
+                    </div>
+                    <p id="urlPreview" class="text-xs text-purple-500 mt-2"></p>
+                </div>
+                <div>
+                    <label class="form-label">API Key</label>
+                    <div class="api-key-wrapper">
+                        <input type="password" id="apiKey" class="form-input" placeholder="sk-..." required>
+                        <button type="button" class="api-key-toggle" onclick="toggleApiKeyVisibility()" title="显示/隐藏">
+                            <svg id="apiKeyEyeIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div>
+                    <label class="form-label">模型</label>
+                    <input type="text" id="models" class="form-input" placeholder="deepseek-chat" required>
+                </div>
+                <div>
+                    <label class="form-label">别名（可选）</label>
+                    <input type="text" id="alias" class="form-input" placeholder="多个别名用逗号分隔，如: ds,deepseek">
+                    <p class="text-xs text-gray-400 mt-1">请求中的 model name 会优先匹配别名，其次匹配模型名</p>
+                </div>
+                <div>
+                    <label class="form-label">自定义参数 (JSON格式，可选)</label>
+                    <textarea id="extraParams" class="form-input" rows="3" placeholder='例如: {"s": true, "temperature": 0.7}'></textarea>
+                    <p class="text-xs text-gray-400 mt-1">这些参数会自动合并到请求body中</p>
+                </div>
+            </div>
+            <div class="flex justify-end space-x-3 mt-6">
+                <button type="button" onclick="closeModal()" class="btn-secondary">取消</button>
+                <button type="submit" class="btn-primary">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 删除确认框 -->
+<div id="deleteModal" class="modal-overlay">
+    <div class="modal-content p-6 max-w-sm">
+        <div class="text-center">
+            <div class="w-16 h-16 mx-auto mb-4 bg-red-100 rounded-full flex items-center justify-center">
+                <svg class="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                </svg>
+            </div>
+            <h3 class="text-lg font-bold text-gray-800 mb-2">确认删除?</h3>
+            <p class="text-gray-500 mb-6">此操作不可撤销，确定要删除这个配置吗？</p>
+            <div class="flex justify-center space-x-3">
+                <button onclick="closeDeleteModal()" class="btn-secondary">取消</button>
+                <button onclick="confirmDelete()" class="btn-danger">删除</button>
+            </div>
+        </div>
+    </div>
+</div>
