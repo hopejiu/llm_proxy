@@ -70,7 +70,7 @@ func main() {
 	slog.Info("配置加载成功", "db_type", cfg.DBType, "proxy_port", cfg.ProxyPort)
 
 	// 初始化数据库
-	db := initDB(cfg)
+	db, dbFallbackMsg := initDB(cfg)
 
 	// 组装依赖
 	providerRepo := repository.NewProviderRepository(db)
@@ -111,6 +111,7 @@ func main() {
 		anthropicHandler: anthropicHandler,
 		ollamaHandler:    ollamaHandler,
 		proxyState:       proxyState{status: "stopped"},
+		dbFallbackMsg:    dbFallbackMsg,
 	}
 	slog.Info("正在启动 Wails 窗口...")
 
@@ -143,14 +144,15 @@ func main() {
 }
 
 // initDB 初始化数据库连接和迁移
-func initDB(cfg *config.Config) *gorm.DB {
-	db := connectDB(cfg)
+func initDB(cfg *config.Config) (*gorm.DB, string) {
+	db, fallbackMsg := connectDB(cfg)
 	migrateDB(db, cfg)
-	return db
+	return db, fallbackMsg
 }
 
 // connectDB 连接数据库并配置连接池
-func connectDB(cfg *config.Config) *gorm.DB {
+// MySQL 连接失败时自动回退到 SQLite，并返回回退提示信息
+func connectDB(cfg *config.Config) (*gorm.DB, string) {
 	var db *gorm.DB
 	var err error
 
@@ -169,18 +171,37 @@ func connectDB(cfg *config.Config) *gorm.DB {
 			fatalMessageBox("启动失败", "SQLite数据库连接失败: "+err.Error())
 		}
 		configurePool(db, cfg)
-	} else {
-		slog.Info("正在连接 MySQL 数据库...")
-		db, err = gorm.Open(mysql.Open(cfg.DSN()), &gorm.Config{})
+		slog.Info("数据库连接成功")
+		return db, ""
+	}
+
+	// 尝试连接 MySQL
+	slog.Info("正在连接 MySQL 数据库...")
+	db, err = gorm.Open(mysql.Open(cfg.DSN()), &gorm.Config{})
+	if err != nil {
+		slog.Warn("MySQL数据库连接失败，自动回退到 SQLite", "error", err)
+		// 回退到 SQLite
+		cfg.FallbackToSQLite()
+		dbPath := cfg.SQLitePath()
+		if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+			if err := os.WriteFile(dbPath, []byte{}, 0644); err != nil {
+				fatalMessageBox("启动失败", "创建 SQLite 文件失败: "+err.Error())
+			}
+		}
+		db, err = gorm.Open(sqlite.Open(cfg.SQLiteDSN()), &gorm.Config{
+			DisableForeignKeyConstraintWhenMigrating: true,
+		})
 		if err != nil {
-			msg := "MySQL数据库连接失败: " + err.Error()
-			msg += "\n\n请检查 .env 中的数据库配置，或设置 DB_TYPE=sqlite 使用本地数据库。"
-			fatalMessageBox("启动失败", msg)
+			fatalMessageBox("启动失败", "SQLite数据库连接失败: "+err.Error())
 		}
 		configurePool(db, cfg)
+		slog.Info("已回退到 SQLite 数据库")
+		return db, "MySQL 连接失败，已自动回退到 SQLite，请在设置中重新配置数据库"
 	}
+
+	configurePool(db, cfg)
 	slog.Info("数据库连接成功")
-	return db
+	return db, ""
 }
 
 // configurePool 配置数据库连接池

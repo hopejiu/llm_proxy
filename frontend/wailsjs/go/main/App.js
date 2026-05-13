@@ -26,6 +26,10 @@ export function GetActiveRequests() {
   return window['go']['main']['App']['GetActiveRequests']();
 }
 
+export function GetDBFallbackMsg() {
+  return window['go']['main']['App']['GetDBFallbackMsg']();
+}
+
 export function GetDailyStats() {
   return window['go']['main']['App']['GetDailyStats']();
 }

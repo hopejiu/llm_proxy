@@ -157,9 +157,16 @@ async function duplicateProvider(id) {
   const provider = providers.find(p => p.id === id);
   if (!provider) return;
   try {
-    await callGo('CreateProvider', provider.name + ' (副本)', provider.base_url,
-      provider.auto_suffix || false, provider.url_suffix || '', provider.api_key,
-      provider.model, provider.alias || '', provider.extra_params || '');
+    await callGo('CreateProvider', {
+      name: provider.name + ' (副本)',
+      base_url: provider.base_url,
+      auto_suffix: provider.auto_suffix || false,
+      url_suffix: provider.url_suffix || '',
+      api_key: provider.api_key,
+      model: provider.model,
+      alias: provider.alias || '',
+      extra_params: provider.extra_params || '',
+    });
     window.showToast('复制成功', 'success');
     loadProviders();
   } catch (error) {
@@ -189,12 +196,28 @@ async function saveProvider(event) {
   };
   try {
     if (id) {
-      await callGo('UpdateProvider', parseInt(id), data.name, data.base_url,
-        data.auto_suffix, data.url_suffix, data.api_key, data.model, data.alias, data.extra_params);
+      await callGo('UpdateProvider', parseInt(id), {
+        name: data.name,
+        base_url: data.base_url,
+        auto_suffix: data.auto_suffix,
+        url_suffix: data.url_suffix,
+        api_key: data.api_key,
+        model: data.model,
+        alias: data.alias,
+        extra_params: data.extra_params,
+      });
       window.showToast('更新成功', 'success');
     } else {
-      await callGo('CreateProvider', data.name, data.base_url, data.auto_suffix,
-        data.url_suffix, data.api_key, data.model, data.alias, data.extra_params);
+      await callGo('CreateProvider', {
+        name: data.name,
+        base_url: data.base_url,
+        auto_suffix: data.auto_suffix,
+        url_suffix: data.url_suffix,
+        api_key: data.api_key,
+        model: data.model,
+        alias: data.alias,
+        extra_params: data.extra_params,
+      });
       window.showToast('添加成功', 'success');
     }
     closeModal();

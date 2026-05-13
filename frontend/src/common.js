@@ -7,7 +7,7 @@ import { GetProviders, CreateProvider, UpdateProvider, DeleteProvider,
          StartProxy, StopProxy, GetProxyStatus,
          GetLogHistory, GetNewLogs,
          GetEnvConfig, SaveEnvConfig, EnvFileExists,
-         GetVersion
+         GetVersion, GetDBFallbackMsg
 } from '../wailsjs/go/main/App.js';
 
 // 统一调用 Go 方法，自动处理 AppError
@@ -21,7 +21,7 @@ async function callGo(methodName, ...args) {
     StartProxy, StopProxy, GetProxyStatus,
     GetLogHistory, GetNewLogs,
     GetEnvConfig, SaveEnvConfig, EnvFileExists,
-    GetVersion,
+    GetVersion, GetDBFallbackMsg,
   };
   const fn = methodMap[methodName];
   if (!fn) throw new Error(`Unknown Go method: ${methodName}`);

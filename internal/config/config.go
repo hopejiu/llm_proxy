@@ -238,6 +238,17 @@ func (c *Config) IsSQLite() bool {
 	return c.DBType == "sqlite"
 }
 
+// FallbackToSQLite 将数据库配置回退到 SQLite（MySQL 连接失败时调用）
+func (c *Config) FallbackToSQLite() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.DBType = "sqlite"
+	c.DBPath = "llm_proxy.db"
+	if !filepath.IsAbs(c.DBPath) {
+		c.DBPath = filepath.Join(DataDir(), c.DBPath)
+	}
+}
+
 // SQLitePath 返回SQLite数据库文件路径（用于 os.Stat 等文件操作）
 func (c *Config) SQLitePath() string {
 	return c.DBPath

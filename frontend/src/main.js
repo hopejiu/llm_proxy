@@ -173,5 +173,18 @@ loadEcharts().then(() => {
   navigateTo('providers');
 }).catch(e => console.error(e));
 updateProxyStatus();
+// 检查数据库回退提示
+checkDBFallback();
 // 定期更新代理状态
 setInterval(updateProxyStatus, 5000);
+
+async function checkDBFallback() {
+  try {
+    const msg = await callGo('GetDBFallbackMsg');
+    if (msg) {
+      showToast(msg, 'error');
+    }
+  } catch (e) {
+    console.error('Failed to check DB fallback:', e);
+  }
+}

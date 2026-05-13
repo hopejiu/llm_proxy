@@ -17,6 +17,8 @@ export function GetActiveRequest(arg1:string):Promise<handler.ActiveRequest>;
 
 export function GetActiveRequests():Promise<Array<handler.ActiveRequest>>;
 
+export function GetDBFallbackMsg():Promise<string>;
+
 export function GetDailyStats():Promise<Array<model.TokenStats>>;
 
 export function GetEnvConfig():Promise<Array<config.EnvItem>>;

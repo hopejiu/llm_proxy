@@ -35,6 +35,7 @@ type App struct {
 	proxyHandler     *handler.ProxyHandler
 	anthropicHandler *handler.AnthropicHandler
 	ollamaHandler    *handler.OllamaHandler
+	dbFallbackMsg    string // MySQL 回退到 SQLite 时的提示信息
 }
 
 // proxyState 代理服务状态
@@ -533,4 +534,9 @@ func (a *App) GetVersion() map[string]string {
 		"version":   Version,
 		"buildTime": BuildTime,
 	}
+}
+
+// GetDBFallbackMsg 获取数据库回退提示信息（MySQL 连接失败回退到 SQLite 时有值）
+func (a *App) GetDBFallbackMsg() string {
+	return a.dbFallbackMsg
 }
