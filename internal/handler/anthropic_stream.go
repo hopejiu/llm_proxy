@@ -14,7 +14,7 @@ import (
 type anthropicStreamState struct {
 	handler             *AnthropicHandler
 	c                   *gin.Context
-	provider            *model.ProviderConfig
+	provider            model.ProviderConfig
 	requestID           string
 	msgID               string
 	fullContent         strings.Builder
@@ -31,7 +31,7 @@ type anthropicStreamState struct {
 }
 
 // newAnthropicStreamState 创建 Anthropic 流式状态
-func newAnthropicStreamState(h *AnthropicHandler, c *gin.Context, provider *model.ProviderConfig, requestID string) *anthropicStreamState {
+func newAnthropicStreamState(h *AnthropicHandler, c *gin.Context, provider model.ProviderConfig, requestID string) *anthropicStreamState {
 	return &anthropicStreamState{
 		handler:          h,
 		c:                c,
@@ -260,7 +260,7 @@ func (s *anthropicStreamState) processLine(line string, currentTokens *StreamTok
 	}
 	data := strings.TrimPrefix(line, "data: ")
 	if data == "[DONE]" {
-		return false
+		return true // 收到 [DONE]，停止处理
 	}
 
 	var streamResp map[string]interface{}
@@ -285,6 +285,7 @@ func (s *anthropicStreamState) processLine(line string, currentTokens *StreamTok
 	// 提取推理内容
 	if reasoning, ok := delta["reasoning_content"].(string); ok && reasoning != "" {
 		s.thinkingContent.WriteString(reasoning)
+		s.tracker.AppendResponse(s.requestID, reasoning)
 	}
 
 	// 处理文本内容

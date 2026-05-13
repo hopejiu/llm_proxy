@@ -63,18 +63,7 @@ type RequestLogVO struct {
 
 // RequestLogDetailVO 请求日志详情（含请求体和响应体）
 type RequestLogDetailVO struct {
-	ID              uint   `json:"id"`
-	ProviderID      uint   `json:"provider_id"`
-	ProviderName    string `json:"provider_name"`
-	Model           string `json:"model"`
-	InputTokens     int    `json:"input_tokens"`
-	OutputTokens    int    `json:"output_tokens"`
-	TotalTokens     int    `json:"total_tokens"`
-	CachedTokens    int    `json:"cached_tokens"`
-	Status          string `json:"status"`
-	ErrorMessage    string `json:"error_message"`
-	Duration        int64  `json:"duration"`
-	CreatedAt       string `json:"created_at"`
+	RequestLogVO
 	ResponseContent string `json:"response_content"`
 	ThinkingContent string `json:"thinking_content"`
 	RequestBody     string `json:"request_body"`
@@ -152,18 +141,7 @@ func requestLogToVO(log *model.RequestLog) RequestLogVO {
 
 func requestLogToDetailVO(log *model.RequestLog) RequestLogDetailVO {
 	return RequestLogDetailVO{
-		ID:              log.ID,
-		ProviderID:      log.ProviderID,
-		ProviderName:    "", // 需要手动填充
-		Model:           log.Model,
-		InputTokens:     log.InputTokens,
-		OutputTokens:    log.OutputTokens,
-		TotalTokens:     log.TotalTokens,
-		CachedTokens:    log.CachedTokens,
-		Status:          log.Status,
-		ErrorMessage:    log.ErrorMessage,
-		Duration:        log.Duration,
-		CreatedAt:       log.CreatedAt.Format("2006-01-02 15:04:05"),
+		RequestLogVO:    requestLogToVO(log),
 		ResponseContent: log.ResponseContent,
 		ThinkingContent: log.ThinkingContent,
 		RequestBody:     log.RequestBody,

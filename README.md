@@ -22,6 +22,7 @@ LLM Proxy 是一个轻量级的大语言模型（LLM）API 中转代理服务，
 - **双数据库支持**：支持 MySQL 和 SQLite，SQLite 模式零依赖开箱即用
 - **数据自动清理**：自动汇总和清理过期请求记录，汇总表永久保留统计数据
 - **运行日志查看**：应用内实时查看运行日志，支持日志级别过滤
+- **日志归档**：启动时自动归档日志文件，按日期保存，过期自动清理
 
 ## 适用场景
 
@@ -41,7 +42,7 @@ LLM Proxy 是一个轻量级的大语言模型（LLM）API 中转代理服务，
 
 ### 编程语言
 
-- **Go**: 1.25+
+- **Go**: 1.24+
 - **Node.js**: 16+（前端构建所需）
 
 ### 数据库（二选一）
@@ -61,7 +62,7 @@ LLM Proxy 是一个轻量级的大语言模型（LLM）API 中转代理服务，
 | github.com/gin-gonic/gin     | v1.12.0   | HTTP 框架（代理服务路由）       |
 | gorm.io/gorm                 | v1.31.1   | ORM 框架                        |
 | gorm.io/driver/mysql         | v1.6.0    | MySQL 驱动                      |
-| github.com/gleberez/sqlite   | v1.11.0   | 纯 Go SQLite 驱动（无需 CGO）   |
+| github.com/glebarez/sqlite   | v1.11.0   | 纯 Go SQLite 驱动（无需 CGO）   |
 | github.com/joho/godotenv     | v1.5.1    | .env 文件加载                   |
 
 ### 前端
@@ -129,7 +130,7 @@ wails dev
 wails build -ldflags="-s -w"
 ```
 
-构建产物输出到 `dist/` 目录，包含 `llm-proxy.exe` 可执行文件。
+构建产物输出到 `build/bin/` 目录，包含 `llm-proxy.exe` 可执行文件。构建脚本会额外复制到 `dist/` 目录。
 
 ---
 
@@ -143,6 +144,8 @@ wails build -ldflags="-s -w"
 git tag v1.0.0
 git push origin v1.0.0
 ```
+
+构建时会自动从 tag 提取版本号，注入到 `main.Version` 和 `main.BuildTime` 中。
 
 ---
 
@@ -160,12 +163,12 @@ git push origin v1.0.0
 | DBPassword             | `DB_PASSWORD`               | （空）           | MySQL 密码                 |
 | DBName                 | `DB_NAME`                   | `llm_proxy`    | 数据库名                   |
 | ProxyPort              | `PROXY_PORT`                | `8888`         | 代理服务端口               |
-| HTTPTimeout            | `HTTP_TIMEOUT`              | `300s`         | HTTP 请求超时              |
+| HTTPTimeout            | `HTTP_TIMEOUT`              | `5m0s`         | HTTP 请求超时              |
 | StreamFirstByteTimeout | `STREAM_FIRST_BYTE_TIMEOUT` | `5s`           | 流式首次数据超时           |
 | StreamMaxRetries       | `STREAM_MAX_RETRIES`        | `10`           | 流式最大重试次数           |
 | RetryDelayBase         | `RETRY_DELAY_BASE`          | `500ms`        | 重试延迟基数               |
 | ProviderCacheTTL       | `PROVIDER_CACHE_TTL`        | `30s`          | Provider 缓存过期时间      |
-| LogCleanupDays         | `LOG_CLEANUP_DAYS`          | `14`           | 日志清理天数               |
+| LogCleanupDays         | `LOG_CLEANUP_DAYS`          | `3`            | 日志归档保留天数           |
 | LogLevel               | `LOG_LEVEL`                 | `info`         | 日志级别（debug/info/warn/error） |
 | AutoStartProxy         | `AUTO_START_PROXY`          | `true`         | 启动时是否自动启动代理服务 |
 
@@ -277,12 +280,11 @@ llm_statistic/
 │   │   ├── ollama_handler.go    # Ollama 兼容代理
 │   │   ├── active_tracker.go   # 活跃请求追踪器
 │   │   ├── stream_tracker.go   # 流式内容追踪（工具调用等）
-│   │   ├── web_handler.go      # Web 管理 API
+│   │   ├── web_handler.go      # Web 管理 API（遗留）
 │   │   └── response.go          # 统一响应格式
 │   ├── logger/
-│   │   ├── logger.go            # 日志初始化
-│   │   ├── handler.go           # slog Handler（文件 + RingBuffer）
-│   │   └── ringbuffer.go        # 环形缓冲区（实时日志推送）
+│   │   ├── logger.go            # 日志初始化、归档、清理
+│   │   └── reader.go            # 增量日志读取器（UI 日志查看）
 │   ├── middleware/
 │   │   └── cors.go              # CORS 中间件
 │   ├── model/
@@ -299,7 +301,8 @@ llm_statistic/
 │       ├── proxy_service.go     # 代理核心逻辑 + Provider 缓存
 │       ├── provider_service.go  # Provider 管理
 │       ├── stats_service.go     # 统计服务（汇总表+明细表混合查询）
-│       └── cleanup_service.go   # 定时汇总和清理服务
+│       ├── cleanup_service.go   # 定时汇总和清理服务
+│       └── codebuddy_service.go # CodeBuddy models.json 配置
 ├── frontend/
 │   ├── src/
 │   │   ├── main.js              # 前端入口
@@ -311,10 +314,15 @@ llm_statistic/
 │   │   │   ├── logs.html/js       # 请求日志页面
 │   │   │   ├── realtime.html/js   # 实时监控页面
 │   │   │   └── settings.html/js   # 设置页面
-│   │   ├── lib/                 # 第三方库
-│   │   └── assets/              # 静态资源
+│   │   ├── assets/              # 字体、图片等静态资源
+│   │   └── lib/                 # 第三方库
+│   ├── dist/                    # Vite 构建输出（go:embed 嵌入）
+│   ├── wailsjs/                 # Wails 自动生成的 JS 绑定
 │   ├── index.html               # Vite 入口
 │   └── package.json
+├── web/                         # 遗留：Gin 模板模式的 Web UI
+│   ├── templates/               # HTML 模板
+│   └── static/                  # JS/CSS 静态文件
 ├── build.ps1                    # Windows 构建脚本
 ├── build.sh                     # Linux 构建脚本
 ├── wails.json                   # Wails 配置
@@ -359,13 +367,18 @@ llm_statistic/
 
 程序运行时在 `%APPDATA%/llm-proxy/` 目录下生成以下文件：
 
-| 文件               | 说明         |
-| ------------------ | ------------ |
-| llm-proxy.log      | 服务运行日志 |
-| llm_proxy.db       | SQLite 数据库（SQLite 模式） |
-| .env               | 配置文件     |
+| 文件                          | 说明                       |
+| ----------------------------- | -------------------------- |
+| llm-proxy.log                 | 当前运行日志               |
+| llm-proxy-YYYY-MM-DD.log     | 归档日志（按日期保存）     |
+| llm_proxy.db                  | SQLite 数据库（SQLite 模式） |
+| .env                          | 配置文件                   |
 
-日志文件会自动清理超过 `LOG_CLEANUP_DAYS` 天的记录。
+### 日志归档机制
+
+- 每次启动时，将当前 `llm-proxy.log` 归档为 `llm-proxy-YYYY-MM-DD.log`（同一天多次启动合并追加）
+- 归档文件超过 `LOG_CLEANUP_DAYS` 天后自动删除
+- 应用内「设置」页面可实时查看运行日志
 
 ---
 
@@ -397,7 +410,7 @@ llm_statistic/
 ### Q: 流式请求卡住不返回？
 
 - 检查 `STREAM_FIRST_BYTE_TIMEOUT` 是否过短（默认 5s）
-- 检查 `HTTP_TIMEOUT` 是否足够（默认 300s，即 5 分钟）
+- 检查 `HTTP_TIMEOUT` 是否足够（默认 5 分钟）
 - 查看日志中是否有 "stream首次数据等待超时" 或 "stream中途卡住超时" 的警告
 
 ---

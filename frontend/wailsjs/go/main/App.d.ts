@@ -27,6 +27,8 @@ export function GetLogDetail(arg1:number):Promise<main.RequestLogDetailVO>;
 
 export function GetLogHistory():Promise<Array<main.LogEntryVO>>;
 
+export function GetNewLogs():Promise<Array<main.LogEntryVO>>;
+
 export function GetProvider(arg1:number):Promise<main.ProviderVO>;
 
 export function GetProviders():Promise<Array<main.ProviderVO>>;

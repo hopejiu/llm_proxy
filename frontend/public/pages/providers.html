@@ -33,6 +33,14 @@
     </div>
 </div>
 
+<!-- 搜索 -->
+<div class="provider-filter-bar animate-fade-in">
+    <div class="provider-search-wrap">
+        <svg class="provider-search-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+        <input type="text" id="providerSearch" class="provider-search-input" placeholder="搜索名称、模型、别名..." oninput="filterProviders()">
+    </div>
+</div>
+
 <!-- Provider 列表 -->
 <div id="providerList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
 
@@ -47,69 +55,71 @@
     <p class="text-gray-500 mb-4">点击上方按钮添加第一个 Provider 配置</p>
 </div>
 
-<!-- 配置模态框 -->
-<div id="providerModal" class="modal-overlay">
-    <div class="modal-content p-6">
-        <div class="flex justify-between items-center mb-6">
-            <h2 id="modalTitle" class="text-xl font-bold text-gray-800">添加配置</h2>
+<!-- 配置侧边抽屉 -->
+<div id="providerModal" class="drawer-overlay">
+    <div class="drawer-panel">
+        <div class="drawer-header">
+            <h2 id="modalTitle" class="text-lg font-bold text-gray-800">添加配置</h2>
             <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 transition-colors">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
                 </svg>
             </button>
         </div>
-        <form id="providerForm" onsubmit="saveProvider(event)">
-            <input type="hidden" id="providerId">
-            <div class="space-y-4">
-                <div>
-                    <label class="form-label">名称</label>
-                    <input type="text" id="name" class="form-input" placeholder="例如：DeepSeek" required>
-                </div>
-                <div>
-                    <label class="form-label">Base URL</label>
-                    <input type="url" id="baseURL" class="form-input" placeholder="https://api.example.com" oninput="updateUrlPreview()" required>
-                    <div class="flex items-center space-x-2 mt-2">
-                        <input type="checkbox" id="autoSuffix" checked onchange="onAutoSuffixChange()" class="w-4 h-4 text-purple-600 rounded border-gray-300 focus:ring-purple-500">
-                        <label for="autoSuffix" class="text-sm text-gray-600">自动拼接后缀</label>
+        <div class="drawer-body">
+            <form id="providerForm" onsubmit="saveProvider(event)">
+                <input type="hidden" id="providerId">
+                <div class="space-y-4">
+                    <div>
+                        <label class="form-label">名称</label>
+                        <input type="text" id="name" class="form-input" placeholder="例如：DeepSeek" required>
                     </div>
-                    <div id="suffixSection" class="mt-2">
-                        <label class="text-sm text-gray-500">URL 后缀</label>
-                        <input type="text" id="urlSuffix" class="form-input text-sm mt-1" value="/v1/chat/completions" oninput="updateUrlPreview()">
+                    <div>
+                        <label class="form-label">Base URL</label>
+                        <input type="url" id="baseURL" class="form-input" placeholder="https://api.example.com" oninput="updateUrlPreview()" required>
+                        <div class="flex items-center space-x-2 mt-2">
+                            <input type="checkbox" id="autoSuffix" checked onchange="onAutoSuffixChange()" class="w-4 h-4 text-purple-600 rounded border-gray-300 focus:ring-purple-500">
+                            <label for="autoSuffix" class="text-sm text-gray-600">自动拼接后缀</label>
+                        </div>
+                        <div id="suffixSection" class="mt-2">
+                            <label class="text-sm text-gray-500">URL 后缀</label>
+                            <input type="text" id="urlSuffix" class="form-input text-sm mt-1" value="/v1/chat/completions" oninput="updateUrlPreview()">
+                        </div>
+                        <p id="urlPreview" class="text-xs text-purple-500 mt-2"></p>
                     </div>
-                    <p id="urlPreview" class="text-xs text-purple-500 mt-2"></p>
-                </div>
-                <div>
-                    <label class="form-label">API Key</label>
-                    <div class="api-key-wrapper">
-                        <input type="password" id="apiKey" class="form-input" placeholder="sk-..." required>
-                        <button type="button" class="api-key-toggle" onclick="toggleApiKeyVisibility()" title="显示/隐藏">
-                            <svg id="apiKeyEyeIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
-                            </svg>
-                        </button>
+                    <div>
+                        <label class="form-label">API Key</label>
+                        <div class="api-key-wrapper">
+                            <input type="password" id="apiKey" class="form-input" placeholder="sk-..." required>
+                            <button type="button" class="api-key-toggle" onclick="toggleApiKeyVisibility()" title="显示/隐藏">
+                                <svg id="apiKeyEyeIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="form-label">模型</label>
+                        <input type="text" id="models" class="form-input" placeholder="deepseek-chat" required>
+                    </div>
+                    <div>
+                        <label class="form-label">别名（可选）</label>
+                        <input type="text" id="alias" class="form-input" placeholder="多个别名用逗号分隔，如: ds,deepseek">
+                        <p class="text-xs text-gray-400 mt-1">请求中的 model name 会优先匹配别名，其次匹配模型名</p>
+                    </div>
+                    <div>
+                        <label class="form-label">自定义参数 (JSON格式，可选)</label>
+                        <textarea id="extraParams" class="form-input" rows="3" placeholder='例如: {"s": true, "temperature": 0.7}'></textarea>
+                        <p class="text-xs text-gray-400 mt-1">这些参数会自动合并到请求body中</p>
                     </div>
                 </div>
-                <div>
-                    <label class="form-label">模型</label>
-                    <input type="text" id="models" class="form-input" placeholder="deepseek-chat" required>
+                <div class="drawer-footer">
+                    <button type="button" onclick="closeModal()" class="btn-secondary">取消</button>
+                    <button type="submit" class="btn-primary">保存</button>
                 </div>
-                <div>
-                    <label class="form-label">别名（可选）</label>
-                    <input type="text" id="alias" class="form-input" placeholder="多个别名用逗号分隔，如: ds,deepseek">
-                    <p class="text-xs text-gray-400 mt-1">请求中的 model name 会优先匹配别名，其次匹配模型名</p>
-                </div>
-                <div>
-                    <label class="form-label">自定义参数 (JSON格式，可选)</label>
-                    <textarea id="extraParams" class="form-input" rows="3" placeholder='例如: {"s": true, "temperature": 0.7}'></textarea>
-                    <p class="text-xs text-gray-400 mt-1">这些参数会自动合并到请求body中</p>
-                </div>
-            </div>
-            <div class="flex justify-end space-x-3 mt-6">
-                <button type="button" onclick="closeModal()" class="btn-secondary">取消</button>
-                <button type="submit" class="btn-primary">保存</button>
-            </div>
-        </form>
+            </form>
+        </div>
     </div>
 </div>
 

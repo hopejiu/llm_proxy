@@ -106,21 +106,6 @@ body {
   color: #92400E;
 }
 
-.tag-openai {
-  background: #D1FAE5;
-  color: #065F46;
-}
-
-.tag-anthropic {
-  background: #DBEAFE;
-  color: #1E40AF;
-}
-
-.tag-ollama {
-  background: #FEF3C7;
-  color: #92400E;
-}
-
 .tag-default {
   background: #F1F5F9;
   color: #475569;
@@ -201,6 +186,69 @@ body {
 
 .modal-overlay.active .modal-content {
   transform: scale(1);
+}
+
+/* 侧边抽屉 */
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(2px);
+  z-index: 50;
+  opacity: 0;
+  visibility: hidden;
+  transition: all 0.3s ease;
+}
+
+.drawer-overlay.active {
+  opacity: 1;
+  visibility: visible;
+}
+
+.drawer-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 50%;
+  min-width: 360px;
+  max-width: 560px;
+  height: 100vh;
+  background: var(--bg-secondary);
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.drawer-overlay.active .drawer-panel {
+  transform: translateX(0);
+}
+
+.drawer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid #E2E8F0;
+  flex-shrink: 0;
+}
+
+.drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+  min-height: 0;
+}
+
+.drawer-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding-top: 20px;
+  border-top: 1px solid #E2E8F0;
+  margin-top: 20px;
+  flex-shrink: 0;
 }
 
 /* 表单样式 */
@@ -352,6 +400,30 @@ input:checked + .toggle-slider:before {
 
   .navbar .nav-actions {
     gap: 0.25rem;
+  }
+}
+
+/* 窄窗口适配（Wails 最小宽度 900px，内容区约 680px） */
+@media (max-width: 1100px) {
+  #pageContainer {
+    padding: 16px 16px;
+  }
+
+  .stats-card {
+    padding: 16px;
+  }
+
+  .stats-card .grid {
+    gap: 8px;
+  }
+
+  th, td {
+    padding: 10px 12px;
+  }
+
+  /* 统计表格隐藏次要列 */
+  .col-hide-narrow {
+    display: none;
   }
 }
 
@@ -526,6 +598,49 @@ input:checked + .toggle-slider:before {
   font-size: 1.5rem;
   font-weight: 700;
   color: #1F2937;
+}
+
+/* Provider 搜索与筛选 */
+.provider-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.provider-search-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 200px;
+  max-width: 360px;
+}
+
+.provider-search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.provider-search-input {
+  width: 100%;
+  padding: 8px 12px 8px 38px;
+  border: 2px solid #E2E8F0;
+  border-radius: 8px;
+  font-size: 14px;
+  transition: all 0.3s ease;
+  background: var(--bg-secondary);
+}
+
+.provider-search-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-lighter);
 }
 
 /* 日志详情元信息 */
@@ -861,8 +976,8 @@ input:checked + .toggle-slider:before {
   font-size: 13px;
   color: #475569;
   line-height: 1.5;
+  max-height: 120px;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: pre-wrap;
   word-break: break-all;
   position: relative;
@@ -1055,12 +1170,13 @@ input:checked + .toggle-slider:before {
   flex: 1;
   min-height: 100vh;
   background: var(--bg-primary);
+  overflow-x: hidden;
 }
 
 #pageContainer {
-  padding: 24px 32px;
+  padding: 20px 24px;
   max-width: 1600px;
-  overflow-x: hidden;
+  overflow-x: auto;
 }
 
 .page-enter {
@@ -1258,6 +1374,27 @@ input:checked + .toggle-slider:before {
   font-weight: 500;
   color: var(--text-primary);
   margin-bottom: 2px;
+}
+
+.settings-effect-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 400;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+  line-height: 1.4;
+}
+
+.settings-effect-live {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.settings-effect-restart {
+  background: #fff3e0;
+  color: #e65100;
 }
 
 .settings-item-desc {

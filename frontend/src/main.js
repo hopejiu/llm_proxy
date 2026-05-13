@@ -60,7 +60,7 @@ async function navigateTo(page, event) {
   // 加载并初始化页面 JS 模块
   try {
     const mod = await pageModules[page]();
-    if (mod.init) mod.init();
+    if (mod.init) await mod.init();
     currentModule = mod;
     currentPage = page;
   } catch (e) {
@@ -92,7 +92,7 @@ async function updateProxyStatus() {
     // 更新 switch 状态（不触发 onchange）
     if (switchEl) {
       switchEl._updating = true;
-      switchEl.checked = status.status === 'running';
+      switchEl.checked = status.status === 'running' || status.status === 'starting';
       setTimeout(() => { switchEl._updating = false; }, 50);
     }
   } catch (e) {

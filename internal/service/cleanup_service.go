@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"llm-proxy/internal/config"
 	"llm-proxy/internal/repository"
 	"log/slog"
 	"time"
@@ -11,14 +12,14 @@ import (
 type CleanupService struct {
 	hourlyStatRepo *repository.HourlyStatRepository
 	requestLogRepo *repository.RequestLogRepository
-	cleanupDays    int
+	cfg            *config.Config
 }
 
-func NewCleanupService(hourlyStatRepo *repository.HourlyStatRepository, requestLogRepo *repository.RequestLogRepository, cleanupDays int) *CleanupService {
+func NewCleanupService(hourlyStatRepo *repository.HourlyStatRepository, requestLogRepo *repository.RequestLogRepository, cfg *config.Config) *CleanupService {
 	return &CleanupService{
 		hourlyStatRepo: hourlyStatRepo,
 		requestLogRepo: requestLogRepo,
-		cleanupDays:    cleanupDays,
+		cfg:            cfg,
 	}
 }
 
@@ -101,13 +102,14 @@ func (s *CleanupService) BackfillMissingHours() error {
 
 // DeleteOldRequestLogs 删除已汇总且超过保留天数的明细记录
 func (s *CleanupService) DeleteOldRequestLogs() error {
-	rowsAffected, err := s.requestLogRepo.DeleteOldRequestLogs(s.cleanupDays)
+	cleanupDays := s.cfg.GetLogCleanupDays()
+	rowsAffected, err := s.requestLogRepo.DeleteOldRequestLogs(cleanupDays)
 	if err != nil {
 		slog.Error("删除旧明细记录失败", "error", err)
 		return err
 	}
 	if rowsAffected > 0 {
-		slog.Info("已删除旧明细记录", "rowsAffected", rowsAffected, "days", s.cleanupDays)
+		slog.Info("已删除旧明细记录", "rowsAffected", rowsAffected, "days", cleanupDays)
 	}
 	return nil
 }

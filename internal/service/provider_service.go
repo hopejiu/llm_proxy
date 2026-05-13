@@ -3,6 +3,7 @@ package service
 import (
 	"llm-proxy/internal/model"
 	"llm-proxy/internal/repository"
+	"strings"
 )
 
 // CacheInvalidator 缓存失效接口，用于解耦 ProviderService 与 ProxyService
@@ -66,4 +67,16 @@ func (s *ProviderService) ImportAll(providers []model.ProviderConfig) error {
 		s.cacheInv.InvalidateCache()
 	}
 	return err
+}
+
+// PreserveAPIKey 如果新 API Key 包含脱敏标记（****），保留原有密钥
+func (s *ProviderService) PreserveAPIKey(id uint, newKey string) (string, error) {
+	if !strings.Contains(newKey, "****") {
+		return newKey, nil
+	}
+	existing, err := s.repo.GetByID(id)
+	if err != nil {
+		return "", err
+	}
+	return existing.APIKey, nil
 }

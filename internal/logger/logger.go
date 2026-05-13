@@ -4,7 +4,9 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 )
 
 // ParseLevel 将字符串解析为 slog.Level
@@ -23,21 +25,11 @@ func ParseLevel(levelStr string) slog.Level {
 	}
 }
 
-// 全局 RingBuffer 引用，供 App 层获取
-var globalRingBuffer *RingBuffer
-
 // 全局日志文件句柄，用于关闭和复用
 var globalLogFile *os.File
 
-// GetRingBuffer 获取全局 RingBuffer
-func GetRingBuffer() *RingBuffer {
-	return globalRingBuffer
-}
-
 // Init 初始化全局 Logger，同时输出到 stdout 和指定日志文件
-// 如果 ringBuf 不为 nil，日志同时写入 RingBuffer
-func Init(logFilePath string, level slog.Level, ringBuf ...*RingBuffer) error {
-	// 关闭之前的日志文件（支持重新初始化）
+func Init(logFilePath string, level slog.Level) error {
 	if globalLogFile != nil {
 		globalLogFile.Close()
 	}
@@ -49,26 +41,18 @@ func Init(logFilePath string, level slog.Level, ringBuf ...*RingBuffer) error {
 	globalLogFile = logFile
 
 	writers := []io.Writer{logFile}
-	// GUI 程序中 stdout 可能不可用，仅在有效时添加
 	if os.Stdout != nil {
 		writers = append(writers, os.Stdout)
 	}
-	multiWriter := io.MultiWriter(writers...)
+	baseWriter := io.MultiWriter(writers...)
 
-	innerHandler := slog.NewTextHandler(multiWriter, &slog.HandlerOptions{
+	handler := slog.NewTextHandler(baseWriter, &slog.HandlerOptions{
 		Level: level,
 	})
 
-	var handler slog.Handler = innerHandler
-
-	// 如果传入了 RingBuffer，包装为 multiHandler
-	if len(ringBuf) > 0 && ringBuf[0] != nil {
-		globalRingBuffer = ringBuf[0]
-		handler = NewMultiHandler(innerHandler, globalRingBuffer)
-	}
-
 	l := slog.New(handler)
 	slog.SetDefault(l)
+
 	return nil
 }
 
@@ -77,4 +61,87 @@ func Sync() {
 	if globalLogFile != nil {
 		globalLogFile.Sync()
 	}
+}
+
+// Close 关闭日志文件
+func Close() {
+	if globalLogFile != nil {
+		globalLogFile.Close()
+		globalLogFile = nil
+	}
+}
+
+// ArchiveLogFile 归档当前日志文件
+// 将 logFilePath 的内容追加到同目录下的 llm-proxy-YYYY-MM-DD.log
+// 然后删除原文件，让 Init 创建新的空文件
+func ArchiveLogFile(logFilePath string) error {
+	info, err := os.Stat(logFilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if info.Size() == 0 {
+		return nil
+	}
+
+	// 读取原文件内容
+	data, err := os.ReadFile(logFilePath)
+	if err != nil {
+		return err
+	}
+
+	// 归档文件名：llm-proxy-2026-05-13.log
+	dir := filepath.Dir(logFilePath)
+	archiveName := "llm-proxy-" + time.Now().Format("2006-01-02") + ".log"
+	archivePath := filepath.Join(dir, archiveName)
+
+	// 追加到归档文件（同一天多次启动合并）
+	f, err := os.OpenFile(archivePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		return err
+	}
+	f.Write(data)
+	f.Close()
+
+	// 删除原文件
+	return os.Remove(logFilePath)
+}
+
+// CleanOldArchives 清理过期的归档日志文件
+func CleanOldArchives(logDir string, keepDays int) error {
+	if keepDays <= 0 {
+		keepDays = 3
+	}
+
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		return err
+	}
+
+	cutoff := time.Now().AddDate(0, 0, -keepDays)
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		// 匹配 llm-proxy-YYYY-MM-DD.log 格式
+		if !strings.HasPrefix(name, "llm-proxy-") || !strings.HasSuffix(name, ".log") {
+			continue
+		}
+		// 提取日期部分：llm-proxy-2026-05-13.log → 2026-05-13
+		dateStr := strings.TrimPrefix(name, "llm-proxy-")
+		dateStr = strings.TrimSuffix(dateStr, ".log")
+		t, err := time.Parse("2006-01-02", dateStr)
+		if err != nil {
+			continue
+		}
+		if t.Before(cutoff) {
+			os.Remove(filepath.Join(logDir, name))
+		}
+	}
+
+	return nil
 }

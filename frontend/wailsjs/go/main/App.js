@@ -46,6 +46,10 @@ export function GetLogHistory() {
   return window['go']['main']['App']['GetLogHistory']();
 }
 
+export function GetNewLogs() {
+  return window['go']['main']['App']['GetNewLogs']();
+}
+
 export function GetProvider(arg1) {
   return window['go']['main']['App']['GetProvider'](arg1);
 }

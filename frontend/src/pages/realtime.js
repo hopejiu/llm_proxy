@@ -80,7 +80,8 @@ function renderActiveRequests(requests) {
     const protocolTag = getProtocolTag(req.protocol);
     let responsePreview = '';
     if (req.response_content) {
-      responsePreview = '<div class="active-request-response"><span class="active-request-response-label">响应:</span> ' + escapeHtml(req.response_content) + '</div>';
+      const previewText = req.response_content.length > 500 ? req.response_content.substring(0, 500) + '...' : req.response_content;
+      responsePreview = '<div class="active-request-response"><span class="active-request-response-label">响应:</span> ' + escapeHtml(previewText) + '</div>';
     }
     let toolCallsHtml = '';
     if (req.tool_calls && req.tool_calls.length > 0) {

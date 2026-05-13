@@ -46,8 +46,17 @@ func main() {
 	// 确定应用数据目录
 	dataDir := config.DataDir()
 
-	// 初始化日志（先于一切，暂不传 RingBuffer）
+	// 归档旧日志文件（启动前执行，确保 Init 创建新文件）
 	logFilePath := filepath.Join(dataDir, "llm-proxy.log")
+	logger.ArchiveLogFile(logFilePath)
+
+	// 加载配置
+	cfg := config.Load()
+
+	// 清理过期归档日志
+	logger.CleanOldArchives(dataDir, cfg.LogCleanupDays)
+
+	// 初始化日志
 	if err := logger.Init(logFilePath, slog.LevelInfo); err != nil {
 		fmt.Printf("无法创建日志文件: %v\n", err)
 		os.Exit(1)
@@ -55,12 +64,8 @@ func main() {
 
 	slog.Info("LLM Proxy 桌面应用启动中...")
 
-	// 加载配置
-	cfg := config.Load()
-
-	// 根据配置重新设置日志级别，同时初始化 RingBuffer
-	ringBuffer := logger.NewRingBuffer(1000)
-	logger.Init(logFilePath, logger.ParseLevel(cfg.LogLevel), ringBuffer)
+	// 根据配置重新设置日志级别
+	logger.Init(logFilePath, logger.ParseLevel(cfg.LogLevel))
 
 	slog.Info("配置加载成功", "db_type", cfg.DBType, "proxy_port", cfg.ProxyPort)
 
@@ -73,7 +78,7 @@ func main() {
 	hourlyStatRepo := repository.NewHourlyStatRepository(db, cfg.DBType)
 
 	// 启动时回填历史汇总数据
-	cleanupSvc := service.NewCleanupService(hourlyStatRepo, requestLogRepo, cfg.LogCleanupDays)
+	cleanupSvc := service.NewCleanupService(hourlyStatRepo, requestLogRepo, cfg)
 	if err := cleanupSvc.BackfillMissingHours(); err != nil {
 		slog.Warn("回填历史汇总数据失败", "error", err)
 	}
@@ -81,25 +86,32 @@ func main() {
 	// 启动时清理旧数据
 	cleanOldData(requestLogRepo, cfg.LogCleanupDays, dataDir)
 
-	proxyService := service.NewProxyService(providerRepo, cfg.ProviderCacheTTL)
+	proxyService := service.NewProxyService(providerRepo, cfg)
 	providerService := service.NewProviderService(providerRepo, proxyService)
 	statsService := service.NewStatsService(hourlyStatRepo, requestLogRepo)
 
 	tracker := handler.NewActiveRequestTracker()
 
-	handlerCfg := handler.HandlerConfig{
-		HTTPTimeout:            cfg.HTTPTimeout,
-		StreamFirstByteTimeout: cfg.StreamFirstByteTimeout,
-		StreamMaxRetries:       cfg.StreamMaxRetries,
-		RetryDelayBase:         cfg.RetryDelayBase,
-	}
-	proxyHandler := handler.NewProxyHandler(proxyService, requestLogRepo, handlerCfg, tracker)
-	anthropicHandler := handler.NewAnthropicHandler(proxyService, requestLogRepo, handlerCfg, tracker)
-	ollamaHandler := handler.NewOllamaHandler(proxyService, requestLogRepo, handlerCfg, tracker)
+	proxyHandler := handler.NewProxyHandler(proxyService, requestLogRepo, cfg, tracker)
+	anthropicHandler := handler.NewAnthropicHandler(proxyService, requestLogRepo, cfg, tracker)
+	ollamaHandler := handler.NewOllamaHandler(proxyService, requestLogRepo, cfg, tracker)
+
+	// 创建日志读取器
+	logReader := logger.NewLogReader(logFilePath)
 
 	// 创建 App
-	app := NewApp(cfg, providerService, statsService, tracker, ringBuffer, cleanupSvc, proxyHandler, anthropicHandler, ollamaHandler)
-
+	app := &App{
+		cfg:              cfg,
+		providerService:  providerService,
+		statsService:     statsService,
+		tracker:          tracker,
+		logReader:        logReader,
+		cleanupSvc:       cleanupSvc,
+		proxyHandler:     proxyHandler,
+		anthropicHandler: anthropicHandler,
+		ollamaHandler:    ollamaHandler,
+		proxyState:       proxyState{status: "stopped"},
+	}
 	slog.Info("正在启动 Wails 窗口...")
 
 	// Wails 配置
@@ -114,6 +126,9 @@ func main() {
 		},
 		OnStartup:  app.startup,
 		OnShutdown: app.shutdown,
+		Debug: options.Debug{
+			OpenInspectorOnStartup: Version == "dev",
+		},
 		Windows: &wailsWindows.Options{
 			WebviewUserDataPath: dataDir,
 		},

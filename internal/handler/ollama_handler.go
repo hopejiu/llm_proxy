@@ -1,9 +1,9 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
+	"llm-proxy/internal/config"
 	"llm-proxy/internal/converter"
 	"llm-proxy/internal/model"
 	"llm-proxy/internal/repository"
@@ -22,7 +22,7 @@ type OllamaHandler struct {
 }
 
 // NewOllamaHandler 创建 Ollama 适配器
-func NewOllamaHandler(proxyService *service.ProxyService, requestLogRepo *repository.RequestLogRepository, cfg HandlerConfig, tracker *ActiveRequestTracker) *OllamaHandler {
+func NewOllamaHandler(proxyService *service.ProxyService, requestLogRepo *repository.RequestLogRepository, cfg *config.Config, tracker *ActiveRequestTracker) *OllamaHandler {
 	return &OllamaHandler{
 		BaseHandler: NewBaseHandler(proxyService, requestLogRepo, cfg, tracker),
 	}
@@ -74,10 +74,7 @@ func (h *OllamaHandler) handleNonStreamChat(c *gin.Context, body []byte, startTi
 	openAIBody, _ := json.Marshal(openAIReq)
 	openAIBody = h.PrepareRequestBody(openAIBody, provider)
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), h.config.HTTPTimeout)
-	defer cancel()
-
-	respBody, err := h.SendRequest(ctx, provider.GetRequestURL(), openAIBody, provider.APIKey)
+	respBody, err := h.SendRequest(c.Request.Context(), provider.GetRequestURL(), openAIBody, provider.APIKey)
 	if err != nil {
 		statusCode, errMsg := ResolveUpstreamError(err)
 		slog.Error("ollama request", "requestID", requestID, "provider", provider.Name, "model", provider.Model, "status", "FAILED", "duration_ms", time.Since(startTime).Milliseconds(), "error", errMsg)
@@ -120,6 +117,11 @@ func (h *OllamaHandler) handleNonStreamChat(c *gin.Context, body []byte, startTi
 	h.SaveRequestLog(reqLog)
 	slog.Info("ollama request", "requestID", requestID, "provider", provider.Name, "model", provider.Model, "status", "SUCCESS", "duration_ms", time.Since(startTime).Milliseconds())
 
+	// 非流式请求完成后，将响应内容追加到 tracker
+	if reqLog.ResponseContent != "" {
+		h.tracker.AppendResponse(requestID, reqLog.ResponseContent)
+	}
+
 	c.JSON(http.StatusOK, ollamaResp)
 }
 
@@ -132,7 +134,7 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, body []byte, startTime 
 
 	c.Header("Content-Type", "application/x-ndjson")
 	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
+	CloseClientConnection(c)
 
 	provider, err := h.GetProviderByModel(ollamaReq.Model)
 	if err != nil {
@@ -161,7 +163,7 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, body []byte, startTime 
 			if strings.HasPrefix(line, "data: ") {
 				data := strings.TrimPrefix(line, "data: ")
 				if data == "[DONE]" {
-					return false
+					return true // 收到 [DONE]，停止处理
 				}
 
 				var streamResp map[string]interface{}
@@ -174,12 +176,9 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, body []byte, startTime 
 				tracker.AppendResponse(requestID, ollamaChunk.Message.Content)
 
 				// 追踪工具调用
-				if choices, ok := streamResp["choices"].([]interface{}); ok && len(choices) > 0 {
-					if choice, ok := choices[0].(map[string]interface{}); ok {
-						if delta, ok := choice["delta"].(map[string]interface{}); ok {
-							trackToolCallsFromDelta(delta, requestID, tracker)
-						}
-					}
+				deltaResult := converter.ExtractDeltaFromChunk(streamResp)
+				if len(deltaResult.ToolCallsDelta) > 0 {
+					trackToolCallsFromDelta(deltaResult.ToolCallsDelta, requestID, tracker)
 				}
 
 				chunkBytes, _ := json.Marshal(ollamaChunk)
@@ -194,6 +193,15 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, body []byte, startTime 
 	if lastErr != nil {
 		slog.Error("ollama request", "requestID", requestID, "provider", provider.Name, "model", provider.Model, "status", "FAILED", "duration_ms", time.Since(startTime).Milliseconds(), "error", lastErr.Error())
 		h.sendOllamaStreamError(c, lastErr.Error())
+		// 超时/错误时也必须发送 done:true 的最终消息，否则客户端会一直挂起等待
+		finalResp := model.OllamaChatResponse{
+			Model:      provider.Model,
+			CreatedAt:  time.Now().Format(time.RFC3339),
+			Done:       true,
+			DoneReason: "error",
+		}
+		finalBytes, _ := json.Marshal(finalResp)
+		SafeWriteSSE(c, string(finalBytes)+"\n")
 		return
 	}
 
@@ -208,9 +216,7 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, body []byte, startTime 
 		EvalCount:       tokens.OutputTokens,
 	}
 	finalBytes, _ := json.Marshal(finalResp)
-	c.Writer.Write(finalBytes)
-	c.Writer.Write([]byte("\n"))
-	c.Writer.Flush()
+	SafeWriteSSE(c, string(finalBytes)+"\n")
 
 	reqLog := &model.RequestLog{
 		ProviderID:      provider.ID,
@@ -224,7 +230,9 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, body []byte, startTime 
 		Status:          "success",
 		Duration:        time.Since(startTime).Milliseconds(),
 	}
+
 	h.SaveRequestLog(reqLog)
+
 	slog.Info("ollama request", "requestID", requestID, "provider", provider.Name, "model", provider.Model, "status", "STREAM_END", "duration_ms", time.Since(startTime).Milliseconds())
 }
 

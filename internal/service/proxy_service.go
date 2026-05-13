@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"llm-proxy/internal/config"
 	"llm-proxy/internal/model"
 	"llm-proxy/internal/repository"
 	"log/slog"
@@ -17,14 +18,14 @@ type ProxyService struct {
 	cacheMu       sync.RWMutex
 	providerCache []model.ProviderConfig
 	cacheExpiry   time.Time
-	cacheTTL      time.Duration
+	cfg           *config.Config
 }
 
 // NewProxyService 创建代理服务实例
-func NewProxyService(providerRepo *repository.ProviderRepository, cacheTTL time.Duration) *ProxyService {
+func NewProxyService(providerRepo *repository.ProviderRepository, cfg *config.Config) *ProxyService {
 	return &ProxyService{
 		providerRepo: providerRepo,
-		cacheTTL:    cacheTTL,
+		cfg:          cfg,
 	}
 }
 
@@ -35,7 +36,8 @@ func (s *ProxyService) Close() {}
 func (s *ProxyService) getAllProvidersCached() ([]model.ProviderConfig, error) {
 	s.cacheMu.RLock()
 	if time.Now().Before(s.cacheExpiry) {
-		providers := s.providerCache
+		providers := make([]model.ProviderConfig, len(s.providerCache))
+		copy(providers, s.providerCache)
 		s.cacheMu.RUnlock()
 		return providers, nil
 	}
@@ -47,7 +49,9 @@ func (s *ProxyService) getAllProvidersCached() ([]model.ProviderConfig, error) {
 
 	// 双重检查
 	if time.Now().Before(s.cacheExpiry) {
-		return s.providerCache, nil
+		result := make([]model.ProviderConfig, len(s.providerCache))
+		copy(result, s.providerCache)
+		return result, nil
 	}
 
 	providers, err := s.providerRepo.GetAll()
@@ -56,8 +60,11 @@ func (s *ProxyService) getAllProvidersCached() ([]model.ProviderConfig, error) {
 	}
 
 	s.providerCache = providers
-	s.cacheExpiry = time.Now().Add(s.cacheTTL)
-	return providers, nil
+	s.cacheExpiry = time.Now().Add(s.cfg.GetProviderCacheTTL())
+	// 返回深拷贝，防止调用者修改影响缓存
+	result := make([]model.ProviderConfig, len(providers))
+	copy(result, providers)
+	return result, nil
 }
 
 // InvalidateCache 主动失效缓存（Provider 增删改时调用）
@@ -73,32 +80,33 @@ func (s *ProxyService) GetAllProviders() ([]model.ProviderConfig, error) {
 }
 
 // GetProviderByModel 根据模型名匹配 Provider，优先别名匹配，其次模型名匹配
-func (s *ProxyService) GetProviderByModel(modelName string) (*model.ProviderConfig, error) {
+func (s *ProxyService) GetProviderByModel(modelName string) (model.ProviderConfig, error) {
 	providers, err := s.getAllProvidersCached()
 	if err != nil {
 		slog.Error("获取Provider列表失败", "error", err)
-		return nil, fmt.Errorf("failed to get providers: %v", err)
+		return model.ProviderConfig{}, fmt.Errorf("failed to get providers: %v", err)
 	}
 	if len(providers) == 0 {
-		return nil, fmt.Errorf("no provider available")
+		return model.ProviderConfig{}, fmt.Errorf("no provider available")
 	}
 
-	// 使用 MatchModelName 方法匹配（内部已实现优先别名、其次模型名）
+	// 优先别名匹配
 	for i := range providers {
 		if providers[i].Model == "" {
 			continue
 		}
 		if providers[i].Alias == modelName {
-			return &providers[i], nil
+			return providers[i], nil
 		}
 	}
 
+	// 其次模型名匹配
 	for i := range providers {
 		if providers[i].Model == "" {
 			continue
 		}
 		if providers[i].Model == modelName {
-			return &providers[i], nil
+			return providers[i], nil
 		}
 	}
 
@@ -107,11 +115,11 @@ func (s *ProxyService) GetProviderByModel(modelName string) (*model.ProviderConf
 	for _, p := range providers {
 		available = append(available, p.GetModelNames()...)
 	}
-	return nil, fmt.Errorf("no provider found for model: %s, available models: %s", modelName, strings.Join(available, ", "))
+	return model.ProviderConfig{}, fmt.Errorf("no provider found for model: %s, available models: %s", modelName, strings.Join(available, ", "))
 }
 
 // PrepareRequestBody 准备请求体，替换model并合并ExtraParams
-func (s *ProxyService) PrepareRequestBody(reqBody []byte, provider *model.ProviderConfig) []byte {
+func (s *ProxyService) PrepareRequestBody(reqBody []byte, provider model.ProviderConfig) []byte {
 	var reqMap map[string]interface{}
 	if err := json.Unmarshal(reqBody, &reqMap); err == nil {
 		reqMap["model"] = provider.Model

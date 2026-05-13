@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"llm-proxy/internal/config"
 	"llm-proxy/internal/converter"
 	"llm-proxy/internal/model"
 	"llm-proxy/internal/repository"
@@ -100,32 +101,31 @@ func (e *UpstreamError) Error() string {
 	return fmt.Sprintf("HTTP %d: %s", e.StatusCode, e.Body)
 }
 
-// HandlerConfig Handler 层可配置参数
-type HandlerConfig struct {
-	HTTPTimeout            time.Duration
-	StreamFirstByteTimeout time.Duration
-	StreamMaxRetries       int
-	RetryDelayBase         time.Duration
-}
-
 // BaseHandler 公共基类，封装 Handler 的公共字段和方法
 type BaseHandler struct {
 	proxyService   *service.ProxyService
 	requestLogRepo *repository.RequestLogRepository
 	httpClient     *http.Client
-	config         HandlerConfig
+	cfg            *config.Config
 	tracker        *ActiveRequestTracker
 }
 
 // NewBaseHandler 创建 BaseHandler 实例
-func NewBaseHandler(proxyService *service.ProxyService, requestLogRepo *repository.RequestLogRepository, cfg HandlerConfig, tracker *ActiveRequestTracker) *BaseHandler {
+func NewBaseHandler(proxyService *service.ProxyService, requestLogRepo *repository.RequestLogRepository, cfg *config.Config, tracker *ActiveRequestTracker) *BaseHandler {
+	transport := &http.Transport{
+		DisableCompression:  true, // 禁用自动解压，SSE 流式响应不应被解压
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     90 * time.Second,
+	}
+
 	return &BaseHandler{
 		proxyService:   proxyService,
 		requestLogRepo: requestLogRepo,
 		httpClient: &http.Client{
-			Timeout: cfg.HTTPTimeout,
+			Transport: transport,
 		},
-		config:  cfg,
+		cfg:     cfg,
 		tracker: tracker,
 	}
 }
@@ -160,7 +160,7 @@ func ResolveUpstreamError(err error) (statusCode int, message string) {
 }
 
 // LogRequest 记录请求汇总日志
-func (h *BaseHandler) LogRequest(c *gin.Context, reqBody []byte, startTime time.Time, status string, errMsg string, provider *model.ProviderConfig) {
+func (h *BaseHandler) LogRequest(c *gin.Context, reqBody []byte, startTime time.Time, status string, errMsg string, provider model.ProviderConfig) {
 	duration := time.Since(startTime).Milliseconds()
 
 	var reqInfo struct {
@@ -181,7 +181,7 @@ func (h *BaseHandler) LogRequest(c *gin.Context, reqBody []byte, startTime time.
 		"duration_ms", duration,
 		"status", status,
 	}
-	if provider != nil {
+	if provider.ID != 0 {
 		attrs = append(attrs, "provider", provider.Name)
 	}
 	if errMsg != "" {
@@ -197,7 +197,7 @@ func (h *BaseHandler) LogRequest(c *gin.Context, reqBody []byte, startTime time.
 }
 
 // GetProviderByModel 根据模型名匹配 Provider
-func (h *BaseHandler) GetProviderByModel(modelName string) (*model.ProviderConfig, error) {
+func (h *BaseHandler) GetProviderByModel(modelName string) (model.ProviderConfig, error) {
 	return h.proxyService.GetProviderByModel(modelName)
 }
 
@@ -207,7 +207,7 @@ func (h *BaseHandler) GetAllProviders() ([]model.ProviderConfig, error) {
 }
 
 // PrepareRequestBody 准备请求体（委托给 ProxyService）
-func (h *BaseHandler) PrepareRequestBody(body []byte, provider *model.ProviderConfig) []byte {
+func (h *BaseHandler) PrepareRequestBody(body []byte, provider model.ProviderConfig) []byte {
 	return h.proxyService.PrepareRequestBody(body, provider)
 }
 
@@ -310,7 +310,7 @@ func (h *BaseHandler) SendRequestWithRetry(ctx context.Context, url string, body
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		if attempt > 1 {
-			retryDelay := time.Duration(attempt) * h.config.RetryDelayBase
+			retryDelay := time.Duration(attempt) * h.cfg.GetRetryDelayBase()
 			slog.Debug("非流式请求重试", "url", url, "attempt", attempt, "maxRetries", maxRetries, "delay", retryDelay)
 			time.Sleep(retryDelay)
 		}
@@ -352,24 +352,17 @@ func sanitizeBody(body string) string {
 	return string(b)
 }
 
-// truncateBody 截断过长的请求体/响应体（按 rune 截断，避免在多字节字符中间截断产生无效 UTF-8）
+// truncateBody 截断过长的请求体/响应体（按字节截断，回退到合法 UTF-8 边界）
 func truncateBody(body string) string {
 	if len(body) <= maxBodySize {
 		return body
 	}
-	// 按 rune 截断，确保不会在 UTF-8 多字节字符中间截断
-	runes := []rune(body)
-	if len(runes) == 0 {
-		return body[:maxBodySize] + "\n...[truncated]"
+	// 按字节截断到 maxBodySize，然后回退确保不在多字节字符中间截断
+	end := maxBodySize
+	for end > 0 && !utf8.RuneStart(body[end]) {
+		end--
 	}
-	// 估算截断位置，逐步回退确保字节长度不超限
-	byteLimit := maxBodySize
-	truncated := string(runes[:len(runes)-1])
-	for len(truncated) > byteLimit && len(runes) > 1 {
-		runes = runes[:len(runes)-1]
-		truncated = string(runes[:len(runes)-1])
-	}
-	return truncated + "\n...[truncated]"
+	return body[:end] + "\n...[truncated]"
 }
 
 // SaveRequestLog 保存请求日志（清理无效 UTF-8，截断过长的请求体/响应体）
@@ -385,7 +378,7 @@ func (h *BaseHandler) SaveRequestLog(reqLog *model.RequestLog) {
 }
 
 // CreateRequestLog 创建请求日志对象
-func (h *BaseHandler) CreateRequestLog(provider *model.ProviderConfig, reqBody string) *model.RequestLog {
+func (h *BaseHandler) CreateRequestLog(provider model.ProviderConfig, reqBody string) *model.RequestLog {
 	return &model.RequestLog{
 		ProviderID:  provider.ID,
 		Model:       provider.Model,
@@ -396,15 +389,13 @@ func (h *BaseHandler) CreateRequestLog(provider *model.ProviderConfig, reqBody s
 
 // StreamRetryConfig 流式重试配置
 type StreamRetryConfig struct {
-	FirstByteTimeout time.Duration
-	MaxRetries       int
+	MaxRetries int
 }
 
 // DefaultStreamRetryConfig 返回基于当前配置的流式重试配置
 func (h *BaseHandler) DefaultStreamRetryConfig() StreamRetryConfig {
 	return StreamRetryConfig{
-		FirstByteTimeout: h.config.StreamFirstByteTimeout,
-		MaxRetries:       h.config.StreamMaxRetries,
+		MaxRetries: h.cfg.GetStreamMaxRetries(),
 	}
 }
 
@@ -422,60 +413,79 @@ type StreamTokens struct {
 	CachedTokens int
 }
 
-// ExecuteStreamWithRetry 执行带超时重试的流式请求
+// ExecuteStreamWithRetry 执行带重试的流式请求
 // 返回: 响应内容构建器, token使用量, 最后错误
 func (h *BaseHandler) ExecuteStreamWithRetry(
 	ctx context.Context,
-	provider *model.ProviderConfig,
-	body []byte,
+	provider model.ProviderConfig,
+	body []byte, // 原始请求体字节，每次重试会通过 bytes.NewReader 创建新 Reader，不会被消费
 	config StreamRetryConfig,
 	processor StreamLineProcessor,
 ) (responseBuilder strings.Builder, tokens StreamTokens, lastErr error) {
 	for attempt := 1; attempt <= config.MaxRetries; attempt++ {
-		attemptStartTime := time.Now()
-
 		if attempt > 1 {
 			// 重试前清空上次的部分数据
 			responseBuilder.Reset()
 			tokens = StreamTokens{}
 
 			// 重试延迟：次数 * 0.5s
-			retryDelay := time.Duration(attempt) * h.config.RetryDelayBase
+			retryDelay := time.Duration(attempt) * h.cfg.GetRetryDelayBase()
 			slog.Warn("流式请求重试", "provider", provider.Name, "model", provider.Model, "attempt", attempt, "maxRetries", config.MaxRetries, "delay", retryDelay)
 			time.Sleep(retryDelay)
 		}
 
 		// 发送HTTP请求
-		httpStartTime := time.Now()
 		httpResp, err := h.SendStreamRequest(ctx, provider.GetRequestURL(), body, provider.APIKey)
-		httpDuration := time.Since(httpStartTime)
-
 		if err != nil {
-			slog.Debug("发送HTTP请求失败", "provider", provider.Name, "attempt", attempt, "duration", httpDuration, "error", err)
+			slog.Debug("发送HTTP请求失败", "provider", provider.Name, "attempt", attempt, "error", err)
 			lastErr = err
 			continue
 		}
-		slog.Debug("HTTP连接建立成功", "provider", provider.Name, "attempt", attempt, "duration", httpDuration)
 
-		// 尝试读取流，带首次数据超时检测
-		success, timeout, err := h.readStreamWithFirstByteTimeout(httpResp, &responseBuilder, &tokens, processor, config.FirstByteTimeout)
+		// 读取流式响应，通过 lineChan 传递行数据
+		// 使用 cancel 通知读取 goroutine 在 processor 提前退出时停止
+		readCtx, readCancel := context.WithCancel(ctx)
+		lineChan := make(chan string, 64)
+		readDone := make(chan error, 1)
+
+		go func() {
+			readDone <- h.readStreamResponse(readCtx, httpResp, &responseBuilder, &tokens, lineChan)
+		}()
+
+		// 在独立 goroutine 中调用 processor 写客户端
+		processorDone := make(chan struct{})
+		go func() {
+			defer close(processorDone)
+			for line := range lineChan {
+				// 客户端已断开，不再写
+				if ctx.Err() != nil {
+					return
+				}
+				if processor != nil {
+					if stop := processor(line, &tokens); stop {
+						// processor 提前退出（如收到 [DONE]），通知读取 goroutine 停止
+						readCancel()
+						return
+					}
+				}
+			}
+		}()
+
+		// 等待读取完成
+		readErr := <-readDone
+		// 关闭 Body
 		httpResp.Body.Close()
+		// 等待 processor 完成
+		<-processorDone
 
-		attemptDuration := time.Since(attemptStartTime)
-
-		if success {
-			slog.Debug("流式请求成功", "provider", provider.Name, "attempt", attempt, "total_duration", attemptDuration)
+		// processor 提前退出时 readErr 可能非 nil（context 取消导致读取中断），视为成功
+		if readErr == nil || readCtx.Err() != nil {
+			slog.Debug("流式请求成功", "provider", provider.Name, "attempt", attempt)
 			return responseBuilder, tokens, nil
 		}
 
-		if timeout {
-			slog.Warn("首次数据超时", "provider", provider.Name, "attempt", attempt, "timeout", config.FirstByteTimeout, "total_duration", attemptDuration)
-			lastErr = fmt.Errorf("stream first byte timeout after %v", config.FirstByteTimeout)
-			continue
-		}
-
-		slog.Debug("读取流式响应失败", "provider", provider.Name, "attempt", attempt, "duration", attemptDuration, "error", err)
-		lastErr = err
+		slog.Debug("读取流式响应失败", "provider", provider.Name, "attempt", attempt, "error", readErr)
+		lastErr = readErr
 		continue
 	}
 
@@ -488,136 +498,71 @@ type StreamError struct {
 	Message string      `json:"message"`
 }
 
-// readStreamWithFirstByteTimeout 读取流式响应，检测首次数据超时和流中途卡住
-// 返回: success(是否成功完成), timeout(是否因超时退出), err(错误信息)
-func (h *BaseHandler) readStreamWithFirstByteTimeout(
+// readStreamResponse 读取流式响应，提取 token 使用量，通过 lineChan 传给调用方
+// 当 ctx 被取消时（如 processor 提前退出），提前终止读取
+func (h *BaseHandler) readStreamResponse(
+	ctx context.Context,
 	httpResp *http.Response,
 	responseBuilder *strings.Builder,
 	tokens *StreamTokens,
-	processor StreamLineProcessor,
-	firstByteTimeout time.Duration,
-) (success bool, timeout bool, err error) {
-	// 用于通知首次数据已到达
-	firstByteChan := make(chan struct{}, 1)
-	// 用于通知读取完成
-	doneChan := make(chan error, 1)
+	lineChan chan<- string,
+) error {
+	defer close(lineChan)
 
-	// 创建可取消的 context，用于在超时时终止读取 goroutine
-	readCtx, readCancel := context.WithCancel(context.Background())
-	defer readCancel()
+	// bufio.Scanner 默认 MaxScanTokenSize 仅 64KB，LLM 流式响应的行
+	// （如 reasoning_content、tool_calls arguments）可能远超此限制，
+	// 导致 scanner.Err() 返回 bufio.ErrTooLong 而提前退出。
+	// 增大缓冲区到 10MB 以支持长行。
+	const maxScanBufferSize = 10 * 1024 * 1024 // 10MB
+	scanner := bufio.NewScanner(httpResp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxScanBufferSize)
 
-	go func() {
-		scanner := bufio.NewScanner(httpResp.Body)
-		firstDataReceived := false
+	for scanner.Scan() {
+		// 检查是否被取消（processor 提前退出场景）
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 
-		for scanner.Scan() {
-			// 检查是否被主 goroutine 取消（首字节超时场景）
-			if readCtx.Err() != nil {
-				return
-			}
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
 
-			line := scanner.Text()
-			if line == "" {
+		responseBuilder.WriteString(line + "\n")
+
+		// 提取 token 使用量
+		if strings.HasPrefix(line, "data: ") {
+			data := strings.TrimPrefix(line, "data: ")
+			if data == "[DONE]" {
+				lineChan <- line
 				continue
 			}
-
-			// 首次收到数据，通知主 goroutine
-			if !firstDataReceived {
-				firstDataReceived = true
-				select {
-				case firstByteChan <- struct{}{}:
-				default:
+			var streamResp map[string]interface{}
+			if err := json.Unmarshal([]byte(data), &streamResp); err == nil {
+				// 检测流式响应中的错误
+				if streamErr := h.detectStreamError(streamResp); streamErr != nil {
+					return fmt.Errorf("stream error: code=%v, message=%s", streamErr.Code, streamErr.Message)
 				}
-			}
 
-			responseBuilder.WriteString(line + "\n")
-
-			// 提取 token 使用量
-			if strings.HasPrefix(line, "data: ") {
-				data := strings.TrimPrefix(line, "data: ")
-				if data == "[DONE]" {
-					// 调用处理器处理行
-					if processor != nil {
-						if stop := processor(line, tokens); stop {
-							break
-						}
-					}
-					continue
+				in, out, total, cached := h.ExtractUsage(streamResp)
+				if in > 0 {
+					tokens.InputTokens = in
 				}
-				var streamResp map[string]interface{}
-				if err := json.Unmarshal([]byte(data), &streamResp); err == nil {
-					// 检测流式响应中的错误
-					if streamErr := h.detectStreamError(streamResp); streamErr != nil {
-						doneChan <- fmt.Errorf("stream error: code=%v, message=%s", streamErr.Code, streamErr.Message)
-						return
-					}
-
-					in, out, total, cached := h.ExtractUsage(streamResp)
-					if in > 0 {
-						tokens.InputTokens = in
-					}
-					if out > 0 {
-						tokens.OutputTokens = out
-					}
-					if total > 0 {
-						tokens.TotalTokens = total
-					}
-					if cached > 0 {
-						tokens.CachedTokens = cached
-					}
+				if out > 0 {
+					tokens.OutputTokens = out
 				}
-			}
-
-			// 调用处理器处理行
-			if processor != nil {
-				if stop := processor(line, tokens); stop {
-					break
+				if total > 0 {
+					tokens.TotalTokens = total
+				}
+				if cached > 0 {
+					tokens.CachedTokens = cached
 				}
 			}
 		}
-		doneChan <- scanner.Err()
-	}()
 
-	// 等待首次数据或超时
-	firstByteStartTime := time.Now()
-	firstByteTimer := time.NewTimer(firstByteTimeout)
-	defer firstByteTimer.Stop()
-
-	select {
-	case <-firstByteChan:
-		// 首次数据已到达，继续等待读取完成
-		firstByteTimer.Stop()
-		slog.Debug("stream首次数据已到达", "wait_duration", time.Since(firstByteStartTime))
-	case <-firstByteTimer.C:
-		// 首次数据超时，取消读取 goroutine
-		readCancel()
-		slog.Warn("stream首次数据等待超时", "timeout", firstByteTimeout, "waited", time.Since(firstByteStartTime))
-		return false, true, nil
+		lineChan <- line
 	}
-
-	// 等待读取完成，带整体超时保护（防止流中途卡住无限阻塞）
-	readStartTime := time.Now()
-	// 流中途卡住超时：使用 HTTPTimeout 作为整体上限
-	stallTimeout := h.config.HTTPTimeout
-	stallTimer := time.NewTimer(stallTimeout)
-	defer stallTimer.Stop()
-
-	select {
-	case err = <-doneChan:
-		stallTimer.Stop()
-		readDuration := time.Since(readStartTime)
-		if err == nil {
-			slog.Debug("stream读取完成", "read_duration", readDuration)
-		} else {
-			slog.Debug("stream读取出错", "read_duration", readDuration, "error", err)
-		}
-		return err == nil, false, err
-	case <-stallTimer.C:
-		// 流中途卡住超时，取消读取 goroutine
-		readCancel()
-		slog.Warn("stream中途卡住超时", "timeout", stallTimeout, "waited", time.Since(readStartTime))
-		return false, false, fmt.Errorf("stream stalled: no data received for %v", stallTimeout)
-	}
+	return scanner.Err()
 }
 
 // detectStreamError 检测流式响应中的错误
@@ -791,4 +736,18 @@ func buildParsedResult(contentBuilder, reasoningBuilder strings.Builder, toolCal
 		return contentBuilder.String()
 	}
 	return string(jsonBytes)
+}
+
+// SafeWriteSSE 写入 SSE 数据
+func SafeWriteSSE(c *gin.Context, data string) {
+	c.Writer.Write([]byte(data))
+	c.Writer.Flush()
+}
+
+// CloseClientConnection 标记请求连接在响应完成后关闭
+// 仅设置 Connection: close 响应头不够，Go 的 net/http 服务器不会因此关闭 TCP 连接
+// 必须同时设置 c.Request.Close = true 才能确保连接被关闭
+func CloseClientConnection(c *gin.Context) {
+	c.Header("Connection", "close")
+	c.Request.Close = true
 }

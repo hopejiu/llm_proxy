@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -28,7 +27,7 @@ type App struct {
 	providerService  *service.ProviderService
 	statsService     *service.StatsService
 	tracker          *handler.ActiveRequestTracker
-	ringBuffer       *logger.RingBuffer
+	logReader        *logger.LogReader
 	cleanupSvc       *service.CleanupService
 	cfg              *config.Config
 	proxyState       proxyState
@@ -46,31 +45,7 @@ type proxyState struct {
 	server *http.Server
 }
 
-// NewApp 创建 App 实例
-func NewApp(
-	cfg *config.Config,
-	providerService *service.ProviderService,
-	statsService *service.StatsService,
-	tracker *handler.ActiveRequestTracker,
-	ringBuffer *logger.RingBuffer,
-	cleanupSvc *service.CleanupService,
-	proxyHandler *handler.ProxyHandler,
-	anthropicHandler *handler.AnthropicHandler,
-	ollamaHandler *handler.OllamaHandler,
-) *App {
-	return &App{
-		cfg:              cfg,
-		providerService:  providerService,
-		statsService:     statsService,
-		tracker:          tracker,
-		ringBuffer:       ringBuffer,
-		cleanupSvc:       cleanupSvc,
-		proxyHandler:     proxyHandler,
-		anthropicHandler: anthropicHandler,
-		ollamaHandler:    ollamaHandler,
-		proxyState:       proxyState{status: "stopped"},
-	}
-}
+
 
 // startup Wails 启动回调
 func (a *App) startup(ctx context.Context) {
@@ -92,9 +67,6 @@ func (a *App) startup(ctx context.Context) {
 	cleanupCtx, cancel := context.WithCancel(ctx)
 	a.cleanupCancel = cancel
 	go a.cleanupSvc.Start(cleanupCtx)
-
-	// 启动日志事件推送
-	go a.startLogEventPusher()
 }
 
 // shutdown Wails 关闭回调
@@ -146,11 +118,9 @@ func (a *App) CreateProvider(data ProviderCreateVO) (ProviderVO, error) {
 // UpdateProvider 更新 Provider（含 API Key 保留逻辑）
 func (a *App) UpdateProvider(id uint, data ProviderUpdateVO) (ProviderVO, error) {
 	// 如果 API Key 是脱敏格式（包含 ****），保留原有密钥
-	if strings.Contains(data.APIKey, "****") {
-		existing, err := a.providerService.GetProvider(id)
-		if err == nil {
-			data.APIKey = existing.APIKey
-		}
+	preservedKey, err := a.providerService.PreserveAPIKey(id, data.APIKey)
+	if err == nil {
+		data.APIKey = preservedKey
 	}
 
 	provider := updateVOToModel(id, data)
@@ -224,76 +194,17 @@ func (a *App) ImportProvidersFromFile() error {
 
 // SetupCodeBuddy 配置 CodeBuddy models.json（适配动态端口）
 func (a *App) SetupCodeBuddy() (CodeBuddyResultVO, error) {
-	homeDir, err := os.UserHomeDir()
+	targetURL := fmt.Sprintf("http://localhost:%s/v1", a.cfg.GetProxyPort())
+	result, err := service.SetupCodeBuddy(targetURL)
 	if err != nil {
-		slog.Error("获取用户目录失败", "error", err)
-		return CodeBuddyResultVO{}, NewAppError("INTERNAL", "获取用户目录失败")
+		return CodeBuddyResultVO{}, NewAppError("INTERNAL", err.Error())
 	}
-
-	codebuddyDir := filepath.Join(homeDir, ".codebuddy")
-	modelsFilePath := filepath.Join(codebuddyDir, "models.json")
-
-	if err := os.MkdirAll(codebuddyDir, 0755); err != nil {
-		slog.Error("创建.codebuddy目录失败", "error", err)
-		return CodeBuddyResultVO{}, NewAppError("INTERNAL", "创建配置目录失败")
-	}
-
-	var config model.CodeBuddyConfig
-
-	if data, err := os.ReadFile(modelsFilePath); err == nil {
-		if err := json.Unmarshal(data, &config); err != nil {
-			slog.Warn("解析models.json失败", "error", err)
-			config = model.CodeBuddyConfig{Models: []model.CodeBuddyModel{}}
-		}
-	} else {
-		config = model.CodeBuddyConfig{Models: []model.CodeBuddyModel{}}
-	}
-
-	// 使用实际配置的代理端口
-	targetURL := fmt.Sprintf("http://localhost:%s/v1", a.cfg.ProxyPort)
-	exists := false
-	for _, m := range config.Models {
-		if m.URL == targetURL {
-			exists = true
-			break
-		}
-	}
-
-	if !exists {
-		newModel := model.CodeBuddyModel{
-			ID:                "astron-code-latest",
-			Name:              "大模型",
-			Vendor:            "自定义大模型",
-			APIKey:            "miyao",
-			URL:               targetURL,
-			SupportsToolCall:  true,
-			SupportsReasoning: true,
-			Temperature:       0.1,
-			MaxInputTokens:    128000,
-		}
-		config.Models = append(config.Models, newModel)
-	}
-
-	data, err := json.MarshalIndent(config, "", "    ")
-	if err != nil {
-		return CodeBuddyResultVO{}, NewAppError("INTERNAL", "序列化配置失败")
-	}
-
-	if err := os.WriteFile(modelsFilePath, data, 0644); err != nil {
-		return CodeBuddyResultVO{}, NewAppError("INTERNAL", "写入配置文件失败")
-	}
-
-	message := "配置文件已创建"
-	if exists {
-		message = "配置已存在，无需添加"
-	}
-
 	return CodeBuddyResultVO{
-		Message: message,
-		Path:    modelsFilePath,
-		Exists:  exists,
-		Added:   !exists,
-		Models:  len(config.Models),
+		Message: result.Message,
+		Path:    result.Path,
+		Exists:  result.Exists,
+		Added:   result.Added,
+		Models:  result.Models,
 	}, nil
 }
 
@@ -410,7 +321,7 @@ func (a *App) GetProxyStatus() ProxyStatusVO {
 	defer a.proxyState.mu.RUnlock()
 	return ProxyStatusVO{
 		Status: a.proxyState.status,
-		Port:   a.cfg.ProxyPort,
+		Port:   a.cfg.GetProxyPort(),
 		Error:  a.proxyState.err,
 	}
 }
@@ -455,9 +366,22 @@ func (a *App) StopProxy() error {
 
 // ========== Log History 相关 ==========
 
-// GetLogHistory 获取 RingBuffer 历史日志
+// GetLogHistory 获取全部运行日志（首次加载）
 func (a *App) GetLogHistory() []LogEntryVO {
-	entries := a.ringBuffer.GetAll()
+	entries := a.logReader.ReadAllLogs()
+	result := make([]LogEntryVO, len(entries))
+	for i, e := range entries {
+		result[i] = LogEntryVO(e)
+	}
+	return result
+}
+
+// GetNewLogs 获取增量运行日志（轮询）
+func (a *App) GetNewLogs() []LogEntryVO {
+	entries := a.logReader.ReadNewLogs()
+	if entries == nil {
+		return []LogEntryVO{}
+	}
 	result := make([]LogEntryVO, len(entries))
 	for i, e := range entries {
 		result[i] = LogEntryVO(e)
@@ -473,15 +397,17 @@ func (a *App) startProxyServer(resultCh chan<- error) {
 	a.proxyState.err = ""
 	a.proxyState.mu.Unlock()
 
+	proxyPort := a.cfg.GetProxyPort()
+
 	// 检查端口可用性
-	ln, err := net.Listen("tcp", ":"+a.cfg.ProxyPort)
+	ln, err := net.Listen("tcp", ":"+proxyPort)
 	if err != nil {
 		a.proxyState.mu.Lock()
 		a.proxyState.status = "error"
-		a.proxyState.err = fmt.Sprintf("端口 %s 已被占用", a.cfg.ProxyPort)
+		a.proxyState.err = fmt.Sprintf("端口 %s 已被占用", proxyPort)
 		a.proxyState.mu.Unlock()
-		slog.Error("代理端口被占用", "port", a.cfg.ProxyPort, "error", err)
-		resultCh <- fmt.Errorf("端口 %s 已被占用: %w", a.cfg.ProxyPort, err)
+		slog.Error("代理端口被占用", "port", proxyPort, "error", err)
+		resultCh <- fmt.Errorf("端口 %s 已被占用: %w", proxyPort, err)
 		return
 	}
 	ln.Close()
@@ -490,7 +416,7 @@ func (a *App) startProxyServer(resultCh chan<- error) {
 	proxyEngine := router.SetupProxy(a.proxyHandler, a.anthropicHandler, a.ollamaHandler)
 
 	server := &http.Server{
-		Addr:    ":" + a.cfg.ProxyPort,
+		Addr:    ":" + proxyPort,
 		Handler: proxyEngine,
 	}
 
@@ -523,7 +449,7 @@ func (a *App) startProxyServer(resultCh chan<- error) {
 	a.proxyState.server = server
 	a.proxyState.mu.Unlock()
 
-	slog.Info("代理服务已启动", "port", a.cfg.ProxyPort)
+	slog.Info("代理服务已启动", "port", proxyPort)
 	resultCh <- nil
 }
 
@@ -552,24 +478,6 @@ func (a *App) stopProxyServer() {
 	a.proxyState.mu.Unlock()
 }
 
-func (a *App) startLogEventPusher() {
-	ch := a.ringBuffer.Subscribe()
-	defer a.ringBuffer.Unsubscribe(ch)
-
-	for {
-		select {
-		case entry := <-ch:
-			runtime.EventsEmit(a.ctx, "logEvent", LogEntryVO{
-				Time:    entry.Time,
-				Level:   entry.Level,
-				Message: entry.Message,
-			})
-		case <-a.ctx.Done():
-			return
-		}
-	}
-}
-
 // buildProviderNameMap 批量查询 Provider 名称，避免 N+1
 func (a *App) buildProviderNameMap(logs []model.RequestLog) map[uint]string {
 	providerIDs := make(map[uint]bool)
@@ -595,9 +503,23 @@ func (a *App) GetEnvConfig() []config.EnvItem {
 	return config.GetEnvItems()
 }
 
-// SaveEnvConfig 保存环境变量配置到 .env 文件
+// SaveEnvConfig 保存环境变量配置到 .env 文件，并热更新内存中的可变配置
 func (a *App) SaveEnvConfig(items map[string]string) error {
-	return config.SaveEnvItems(items)
+	if err := config.SaveEnvItems(items); err != nil {
+		return err
+	}
+
+	// 热更新内存中的可变配置（直接从 .env 文件读取，不依赖 os.Getenv）
+	a.cfg.HotUpdate()
+
+	// 如果日志级别变更，重新初始化 logger
+	logFilePath := filepath.Join(config.DataDir(), "llm-proxy.log")
+	if err := logger.Init(logFilePath, logger.ParseLevel(a.cfg.GetLogLevel())); err != nil {
+		slog.Warn("重新初始化日志级别失败", "error", err)
+	}
+
+	slog.Info("配置已热更新", "log_level", a.cfg.GetLogLevel(), "stream_max_retries", a.cfg.GetStreamMaxRetries(), "proxy_port", a.cfg.GetProxyPort())
+	return nil
 }
 
 // EnvFileExists 检查 .env 文件是否存在

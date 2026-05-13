@@ -1,24 +1,34 @@
-import { callGo, escapeHtml, pad } from '../common.js';
-import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime.js';
+import { callGo, escapeHtml, pad, showToast } from '../common.js';
 
 let allLogs = [];
 let paused = false;
 let maxLogs = 2000;
+let pollTimer = null;
 
-function init() {
-  // 加载历史日志
-  loadHistory();
-  // 订阅实时日志事件
-  EventsOn('logEvent', onLogEntry);
-  // 挂载全局函数
+async function init() {
+  await loadHistory();
+  startPolling();
+
   window.filterLogs = filterLogs;
   window.togglePause = togglePause;
   window.clearLogs = clearLogs;
 }
 
 function destroy() {
-  EventsOff('logEvent');
+  stopPolling();
   ['filterLogs', 'togglePause', 'clearLogs'].forEach(fn => delete window[fn]);
+}
+
+function startPolling() {
+  stopPolling();
+  pollTimer = setInterval(pollNewLogs, 1000);
+}
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
 }
 
 async function loadHistory() {
@@ -26,14 +36,24 @@ async function loadHistory() {
     const entries = await callGo('GetLogHistory');
     allLogs = entries || [];
     renderLogs();
-  } catch (e) { console.error('Failed to load log history:', e); }
+  } catch (e) {
+    console.error('[logs] Failed to load log history:', e);
+    showToast('加载日志历史失败: ' + e, 'error');
+  }
 }
 
-function onLogEntry(entry) {
+async function pollNewLogs() {
   if (paused) return;
-  allLogs.push(entry);
-  if (allLogs.length > maxLogs) allLogs = allLogs.slice(-maxLogs);
-  renderLogs();
+  try {
+    const entries = await callGo('GetNewLogs');
+    if (entries && entries.length > 0) {
+      allLogs.push(...entries);
+      if (allLogs.length > maxLogs) allLogs = allLogs.slice(-maxLogs);
+      renderLogs();
+    }
+  } catch (e) {
+    console.error('[logs] Poll failed:', e);
+  }
 }
 
 function filterLogs() {
@@ -44,7 +64,7 @@ function togglePause() {
   paused = !paused;
   const btn = document.getElementById('logPauseBtn');
   if (btn) btn.classList.toggle('active', paused);
-  window.showToast(paused ? '日志已暂停' : '日志已继续', 'success');
+  showToast(paused ? '日志已暂停' : '日志已继续', 'success');
 }
 
 function clearLogs() {
@@ -70,8 +90,12 @@ function renderLogs() {
   const countEl = document.getElementById('logCount');
   if (countEl) countEl.textContent = `${filtered.length} 条日志`;
 
-  // 性能优化：只渲染最后 500 条
   const displayLogs = filtered.slice(-500);
+
+  if (displayLogs.length === 0) {
+    body.innerHTML = '<div style="padding:20px;text-align:center;color:#999;">暂无日志数据</div>';
+    return;
+  }
 
   const wasAtBottom = body.scrollTop + body.clientHeight >= body.scrollHeight - 20;
 
@@ -81,13 +105,11 @@ function renderLogs() {
     return `<div class="log-line"><span class="log-line-time">${time}</span><span class="log-line-level ${level}">${level.toUpperCase()}</span><span class="log-line-msg">${escapeHtml(l.message)}</span></div>`;
   }).join('');
 
-  // 自动滚动到底部（如果之前就在底部）
   if (wasAtBottom) body.scrollTop = body.scrollHeight;
 }
 
 function formatLogTime(timeStr) {
   if (!timeStr) return '';
-  // 后端格式为 "15:04:05.000"（纯时间），直接返回即可
   if (/^\d{2}:\d{2}:\d{2}/.test(timeStr) && !timeStr.includes('T') && !timeStr.includes('-')) {
     return timeStr;
   }

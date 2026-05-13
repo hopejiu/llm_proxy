@@ -5,6 +5,10 @@
         <p class="text-gray-500 mt-1">Token 用量与请求趋势分析</p>
     </div>
     <div class="flex items-center space-x-3">
+        <div class="flex items-center space-x-2 text-sm">
+            <span class="text-gray-500">自动刷新</span>
+            <label class="toggle"><input type="checkbox" id="autoRefreshSwitch" onchange="toggleAutoRefresh()"><span class="toggle-slider"></span></label>
+        </div>
         <button id="refreshBtn" class="refresh-btn" onclick="refreshAll()" title="刷新数据">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
         </button>
@@ -12,7 +16,7 @@
 </div>
 
 <!-- 概览卡片 -->
-<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8 animate-fade-in">
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8 animate-fade-in">
     <div class="stats-card">
         <div class="flex items-center justify-between mb-4"><span class="text-sm font-medium text-gray-500">今日用量</span><span class="tag tag-primary">Today</span></div>
         <div class="flex items-baseline"><div class="stats-number" id="todayTotal"><span class="skeleton skeleton-number"></span></div><span class="stats-unit" id="todayTotalUnit" style="display:none;">Tokens</span><span class="trend-indicator" id="todayTrend" style="display:none;"></span></div>
@@ -78,7 +82,7 @@
 <div class="card p-6 animate-fade-in" style="animation-delay: 0.2s;">
     <h2 class="text-lg font-bold text-gray-800 mb-4">每日明细</h2>
     <div class="table-container">
-        <table><thead><tr><th>日期</th><th>请求数</th><th>Input Tokens</th><th>Output Tokens</th><th>Cached Tokens</th><th>Total Tokens</th></tr></thead><tbody id="statsTableBody"></tbody></table>
+        <table><thead><tr><th>日期</th><th>请求数</th><th class="col-hide-narrow">Input Tokens</th><th class="col-hide-narrow">Output Tokens</th><th class="col-hide-narrow">Cached Tokens</th><th>Total Tokens</th></tr></thead><tbody id="statsTableBody"></tbody></table>
     </div>
 </div>
 
@@ -86,12 +90,8 @@
 <div class="card p-6 mt-8 animate-fade-in" style="animation-delay: 0.3s;">
     <div class="flex justify-between items-center mb-4">
         <h2 class="text-lg font-bold text-gray-800">最近请求</h2>
-        <div class="flex items-center space-x-2 text-sm">
-            <span class="text-gray-500">自动刷新</span>
-            <label class="toggle"><input type="checkbox" id="autoRefreshSwitch" onchange="toggleAutoRefresh()"><span class="toggle-slider"></span></label>
-        </div>
     </div>
     <div class="table-container">
-        <table><thead><tr><th>时间</th><th>Provider</th><th>模型</th><th>Input</th><th>Output</th><th>Cached</th><th>Total</th><th>耗时</th><th>Token/s</th><th>状态</th><th>操作</th></tr></thead><tbody id="recentLogsBody"></tbody></table>
+        <table><thead><tr><th>时间</th><th>Provider</th><th>模型</th><th class="col-hide-narrow">Input</th><th class="col-hide-narrow">Output</th><th class="col-hide-narrow">Cached</th><th>Total</th><th class="col-hide-narrow">耗时</th><th class="col-hide-narrow">Token/s</th><th>状态</th><th>操作</th></tr></thead><tbody id="recentLogsBody"></tbody></table>
     </div>
 </div>

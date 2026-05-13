@@ -31,8 +31,8 @@ func respondCreated(c *gin.Context, data interface{}) {
 
 // 错误码常量
 const (
-	ErrBadRequest   = "bad_request"
-	ErrNotFound     = "not_found"
-	ErrInternal     = "internal_error"
-	ErrInvalidInput = "invalid_input"
+	CodeBadRequest   = "bad_request"
+	CodeNotFound     = "not_found"
+	CodeInternal     = "internal_error"
+	CodeInvalidInput = "invalid_input"
 )

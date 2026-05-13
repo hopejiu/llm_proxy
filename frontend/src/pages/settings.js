@@ -43,13 +43,16 @@ function renderSettings() {
 function renderItem(item) {
   const currentValue = currentValues[item.key] || item.value;
   const dependsAttr = item.depends_on ? `data-depends-on="${item.depends_on}" data-depends-value="${item.depends_value}"` : '';
+  const effectBadge = item.restart_required
+    ? '<span class="settings-effect-badge settings-effect-restart">需重启</span>'
+    : '<span class="settings-effect-badge settings-effect-live">实时生效</span>';
 
   if (item.type === 'bool') {
     const checked = currentValue === 'true' || currentValue === '1';
     return `
       <div class="settings-item settings-item-bool" ${dependsAttr} data-key="${item.key}">
         <div class="settings-item-info">
-          <label class="settings-item-label">${item.label}</label>
+          <label class="settings-item-label">${item.label} ${effectBadge}</label>
           <span class="settings-item-desc">${item.description}</span>
         </div>
         <label class="toggle">
@@ -69,7 +72,7 @@ function renderItem(item) {
     return `
       <div class="settings-item" ${dependsAttr} data-key="${item.key}">
         <div class="settings-item-info">
-          <label class="settings-item-label">${item.label}</label>
+          <label class="settings-item-label">${item.label} ${effectBadge}</label>
           <span class="settings-item-desc">${item.description}</span>
         </div>
         <select class="form-input settings-input settings-select" data-key="${item.key}"
@@ -84,7 +87,7 @@ function renderItem(item) {
     return `
       <div class="settings-item" ${dependsAttr} data-key="${item.key}">
         <div class="settings-item-info">
-          <label class="settings-item-label">${item.label}</label>
+          <label class="settings-item-label">${item.label} ${effectBadge}</label>
           <span class="settings-item-desc">${item.description}</span>
         </div>
         <div class="settings-item-input-wrap">
@@ -108,7 +111,7 @@ function renderItem(item) {
   return `
     <div class="settings-item" ${dependsAttr} data-key="${item.key}">
       <div class="settings-item-info">
-        <label class="settings-item-label">${item.label}</label>
+        <label class="settings-item-label">${item.label} ${effectBadge}</label>
         <span class="settings-item-desc">${item.description}</span>
       </div>
       <input type="${inputType}" class="form-input settings-input" 
@@ -157,7 +160,13 @@ function onSettingsChange(key, value) {
   saveTimer = setTimeout(async () => {
     try {
       await callGo('SaveEnvConfig', currentValues);
-      showToast('配置已保存', 'success');
+      // 根据是否需要重启显示不同提示
+      const item = envItems.find(i => i.key === key);
+      if (item && item.restart_required) {
+        showToast('配置已保存，需重启程序生效', 'warning');
+      } else {
+        showToast('配置已保存并生效', 'success');
+      }
     } catch (e) {
       showToast('保存失败: ' + e, 'error');
     }
@@ -198,7 +207,7 @@ async function renderVersion() {
       el.innerHTML = `
         <div class="version-info">
           <span class="version-label">LLM Proxy</span>
-          <span class="version-value">v${escapeHtml(info.version || 'dev')}</span>
+          <span class="version-value">${escapeHtml(info.version === 'dev' ? 'dev' : 'v' + info.version)}</span>
           <span class="version-separator">·</span>
           <span class="version-build">构建于 ${escapeHtml(info.buildTime || 'unknown')}</span>
         </div>

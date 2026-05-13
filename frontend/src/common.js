@@ -5,7 +5,7 @@ import { GetProviders, CreateProvider, UpdateProvider, DeleteProvider,
          GetRecentLogs, GetLogDetail,
          GetActiveRequests, GetActiveRequest,
          StartProxy, StopProxy, GetProxyStatus,
-         GetLogHistory,
+         GetLogHistory, GetNewLogs,
          GetEnvConfig, SaveEnvConfig, EnvFileExists,
          GetVersion
 } from '../wailsjs/go/main/App.js';
@@ -19,7 +19,7 @@ async function callGo(methodName, ...args) {
     GetRecentLogs, GetLogDetail,
     GetActiveRequests, GetActiveRequest,
     StartProxy, StopProxy, GetProxyStatus,
-    GetLogHistory,
+    GetLogHistory, GetNewLogs,
     GetEnvConfig, SaveEnvConfig, EnvFileExists,
     GetVersion,
   };

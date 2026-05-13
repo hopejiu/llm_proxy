@@ -2,6 +2,7 @@ import { callGo, escapeHtml, extractErrorMessage } from '../common.js';
 
 let providers = [];
 let deleteId = null;
+let currentSearchText = '';
 
 function init() {
   loadProviders();
@@ -20,13 +21,15 @@ function init() {
   window.onAutoSuffixChange = onAutoSuffixChange;
   window.toggleApiKeyVisibility = toggleApiKeyVisibility;
   window.updateUrlPreview = updateUrlPreview;
+  window.filterProviders = filterProviders;
 }
 
 function destroy() {
   // 清理全局函数
   ['openModal','closeModal','saveProvider','editProvider','duplicateProvider',
    'showDeleteModal','closeDeleteModal','confirmDelete','exportProviders',
-   'importProviders','setupCodeBuddy','onAutoSuffixChange','toggleApiKeyVisibility','updateUrlPreview'
+   'importProviders','setupCodeBuddy','onAutoSuffixChange','toggleApiKeyVisibility',
+   'updateUrlPreview','filterProviders'
   ].forEach(fn => delete window[fn]);
 }
 
@@ -45,14 +48,27 @@ function renderProviders() {
   const emptyState = document.getElementById('emptyState');
   if (!container) return;
 
-  if (providers.length === 0) {
+  const filtered = getFilteredProviders();
+
+  if (filtered.length === 0) {
     container.innerHTML = '';
     emptyState?.classList.remove('hidden');
+    if (providers.length > 0 && filtered.length === 0) {
+      emptyState && (emptyState.querySelector('h3').textContent = '无匹配结果');
+      emptyState && (emptyState.querySelector('p').textContent = '尝试调整搜索条件或筛选类型');
+    }
     return;
   }
 
   emptyState?.classList.add('hidden');
-  container.innerHTML = providers.map((p, index) => `
+  // 恢复默认空状态文案
+  const h3 = emptyState?.querySelector('h3');
+  const p = emptyState?.querySelector('p');
+  if (h3) h3.textContent = '暂无配置';
+  if (p) p.textContent = '点击上方按钮添加第一个 Provider 配置';
+
+  container.innerHTML = filtered.map((p, index) => {
+    return `
     <div class="card p-6 animate-fade-in" style="animation-delay: ${index * 0.05}s;">
       <div class="flex justify-between items-start mb-4">
         <div class="flex items-center space-x-3">
@@ -78,7 +94,27 @@ function renderProviders() {
         </button>
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
+}
+
+function getFilteredProviders() {
+  return providers.filter(p => {
+    if (currentSearchText) {
+      const q = currentSearchText.toLowerCase();
+      const name = (p.name || '').toLowerCase();
+      const model = (p.model || '').toLowerCase();
+      const alias = (p.alias || '').toLowerCase();
+      const baseUrl = (p.base_url || '').toLowerCase();
+      return name.includes(q) || model.includes(q) || alias.includes(q) || baseUrl.includes(q);
+    }
+    return true;
+  });
+}
+
+function filterProviders() {
+  currentSearchText = document.getElementById('providerSearch')?.value || '';
+  renderProviders();
 }
 
 function openModal(isEdit = false) {

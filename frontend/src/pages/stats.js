@@ -251,7 +251,7 @@ function renderTable(stats) {
   if (!tbody) return;
   if (stats.length === 0) { tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state"><p>暂无数据</p></div></td></tr>'; return; }
   const reversed = [...stats].reverse();
-  tbody.innerHTML = reversed.map(s => `<tr><td>${extractDateString(s.date)}</td><td>${formatNumber(s.request_count)}</td><td>${formatNumber(s.total_input_tokens)}</td><td>${formatNumber(s.total_output_tokens)}</td><td class="text-green-600">${formatNumber(s.total_cached_tokens)}</td><td class="font-semibold text-purple-600">${formatNumber(s.total_tokens)}</td></tr>`).join('');
+  tbody.innerHTML = reversed.map(s => `<tr><td>${extractDateString(s.date)}</td><td>${formatNumber(s.request_count)}</td><td class="col-hide-narrow">${formatNumber(s.total_input_tokens)}</td><td class="col-hide-narrow">${formatNumber(s.total_output_tokens)}</td><td class="col-hide-narrow text-green-600">${formatNumber(s.total_cached_tokens)}</td><td class="font-semibold text-purple-600">${formatNumber(s.total_tokens)}</td></tr>`).join('');
 }
 
 function renderLogs(logs) {
@@ -263,8 +263,8 @@ function renderLogs(logs) {
     const durationSeconds = (log.duration / 1000).toFixed(1);
     return `<tr>
       <td>${formatTime(log.created_at)}</td><td>${escapeHtml(log.provider_name) || '-'}</td><td>${escapeHtml(log.model)}</td>
-      <td>${formatNumber(log.input_tokens)}</td><td>${formatNumber(log.output_tokens)}</td><td class="text-green-600">${formatNumber(log.cached_tokens)}</td>
-      <td class="font-semibold text-purple-600">${formatNumber(log.total_tokens)}</td><td>${durationSeconds}s</td><td class="text-blue-600 font-medium">${tokensPerSecond}</td>
+      <td class="col-hide-narrow">${formatNumber(log.input_tokens)}</td><td class="col-hide-narrow">${formatNumber(log.output_tokens)}</td><td class="col-hide-narrow text-green-600">${formatNumber(log.cached_tokens)}</td>
+      <td class="font-semibold text-purple-600">${formatNumber(log.total_tokens)}</td><td class="col-hide-narrow">${durationSeconds}s</td><td class="col-hide-narrow text-blue-600 font-medium">${tokensPerSecond}</td>
       <td>${log.status === 'success' ? '<span class="tag tag-success">成功</span>' : '<span class="tag tag-error">失败</span>'}</td>
       <td><button onclick="showLogDetail(${log.id})" class="text-purple-600 hover:text-purple-800 text-sm">查看</button></td>
     </tr>`;
@@ -274,7 +274,7 @@ function renderLogs(logs) {
 function toggleAutoRefresh() {
   const enabled = document.getElementById('autoRefreshSwitch')?.checked;
   if (enabled) {
-    autoRefreshInterval = setInterval(() => { loadStats(); loadRecentLogs(); loadHourlyStats(getCurrentHourlyDate()); }, 10000);
+    autoRefreshInterval = setInterval(() => { refreshAll(); }, 10000);
     window.showToast('已开启自动刷新（每10秒）', 'success');
   } else {
     if (autoRefreshInterval) { clearInterval(autoRefreshInterval); autoRefreshInterval = null; }

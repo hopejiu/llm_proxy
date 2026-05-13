@@ -1,15 +1,14 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
-
+	"llm-proxy/internal/config"
 	"llm-proxy/internal/converter"
 	"llm-proxy/internal/model"
 	"llm-proxy/internal/repository"
 	"llm-proxy/internal/service"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -22,7 +21,7 @@ type AnthropicHandler struct {
 }
 
 // NewAnthropicHandler 创建 Anthropic 适配器
-func NewAnthropicHandler(proxyService *service.ProxyService, requestLogRepo *repository.RequestLogRepository, cfg HandlerConfig, tracker *ActiveRequestTracker) *AnthropicHandler {
+func NewAnthropicHandler(proxyService *service.ProxyService, requestLogRepo *repository.RequestLogRepository, cfg *config.Config, tracker *ActiveRequestTracker) *AnthropicHandler {
 	return &AnthropicHandler{
 		BaseHandler: NewBaseHandler(proxyService, requestLogRepo, cfg, tracker),
 	}
@@ -70,10 +69,7 @@ func (h *AnthropicHandler) handleNonStreamMessages(c *gin.Context, body []byte, 
 	openAIBody, _ := json.Marshal(openAIReq)
 	openAIBody = h.PrepareRequestBody(openAIBody, provider)
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), h.config.HTTPTimeout)
-	defer cancel()
-
-	respBody, err := h.SendRequest(ctx, provider.GetRequestURL(), openAIBody, provider.APIKey)
+	respBody, err := h.SendRequest(c.Request.Context(), provider.GetRequestURL(), openAIBody, provider.APIKey)
 	if err != nil {
 		statusCode, errMsg := ResolveUpstreamError(err)
 		slog.Error("anthropic request", "requestID", requestID, "provider", provider.Name, "model", provider.Model, "status", "FAILED", "duration_ms", time.Since(startTime).Milliseconds(), "error", errMsg)
@@ -118,6 +114,14 @@ func (h *AnthropicHandler) handleNonStreamMessages(c *gin.Context, body []byte, 
 	h.SaveRequestLog(reqLog)
 	slog.Info("anthropic request", "requestID", requestID, "provider", provider.Name, "model", provider.Model, "status", "SUCCESS", "duration_ms", time.Since(startTime).Milliseconds())
 
+	// 非流式请求完成后，将响应内容追加到 tracker
+	if reqLog.ResponseContent != "" {
+		h.tracker.AppendResponse(requestID, reqLog.ResponseContent)
+	}
+	if reqLog.ThinkingContent != "" {
+		h.tracker.AppendResponse(requestID, reqLog.ThinkingContent)
+	}
+
 	c.JSON(http.StatusOK, anthropicResp)
 }
 
@@ -139,8 +143,8 @@ func (h *AnthropicHandler) handleStreamMessages(c *gin.Context, body []byte, sta
 
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-
+	CloseClientConnection(c)
+	
 	openAIReq := converter.AnthropicToOpenAI(&anthropicReq, provider.Model)
 	openAIBody, _ := json.Marshal(openAIReq)
 	openAIBody = h.PrepareRequestBody(openAIBody, provider)
@@ -160,12 +164,14 @@ func (h *AnthropicHandler) handleStreamMessages(c *gin.Context, body []byte, sta
 	if lastErr != nil {
 		slog.Error("anthropic request", "requestID", requestID, "provider", provider.Name, "model", provider.Model, "status", "FAILED", "duration_ms", time.Since(startTime).Milliseconds(), "error", lastErr.Error())
 		h.sendAnthropicSSEError(c, lastErr.Error())
+		// 超时/错误时也必须关闭流状态并发送 [DONE]，否则客户端会一直挂起等待
+		state.finalize(&tokens)
+		SafeWriteSSE(c, "data: [DONE]\n\n")
 		return
 	}
 
 	// 确保发送 [DONE] 标记（某些上游可能不发送，导致客户端一直等待）
-	c.Writer.Write([]byte("data: [DONE]\n\n"))
-	c.Writer.Flush()
+	SafeWriteSSE(c, "data: [DONE]\n\n")
 
 	// 如果流结束时没有收到 finish_reason，补发结束事件
 	state.finalize(&tokens)
@@ -184,7 +190,9 @@ func (h *AnthropicHandler) handleStreamMessages(c *gin.Context, body []byte, sta
 		Status:          "success",
 		Duration:        time.Since(startTime).Milliseconds(),
 	}
+
 	h.SaveRequestLog(reqLog)
+
 	slog.Info("anthropic request", "requestID", requestID, "provider", provider.Name, "model", provider.Model, "status", "STREAM_END", "duration_ms", time.Since(startTime).Milliseconds())
 }
 

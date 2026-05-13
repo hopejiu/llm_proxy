@@ -25,6 +25,7 @@ export namespace config {
 	    options?: EnvSelectOption[];
 	    depends_on?: string;
 	    depends_value?: string;
+	    restart_required: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new EnvItem(source);
@@ -42,6 +43,7 @@ export namespace config {
 	        this.options = this.convertValues(source["options"], EnvSelectOption);
 	        this.depends_on = source["depends_on"];
 	        this.depends_value = source["depends_value"];
+	        this.restart_required = source["restart_required"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
