@@ -52,10 +52,6 @@ func (h *WebHandler) GetProviders(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, CodeInternal, "获取Provider列表失败")
 		return
 	}
-	// 脱敏 API Key
-	for i := range providers {
-		providers[i].APIKey = providers[i].MaskAPIKey()
-	}
 	respondOK(c, providers)
 }
 
@@ -74,7 +70,6 @@ func (h *WebHandler) GetProvider(c *gin.Context) {
 		respondError(c, http.StatusNotFound, CodeNotFound, "Provider不存在")
 		return
 	}
-	provider.APIKey = provider.MaskAPIKey()
 	respondOK(c, provider)
 }
 

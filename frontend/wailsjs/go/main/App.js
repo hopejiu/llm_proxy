@@ -18,6 +18,10 @@ export function ExportProvidersToFile() {
   return window['go']['main']['App']['ExportProvidersToFile']();
 }
 
+export function FetchProviderModels(arg1, arg2) {
+  return window['go']['main']['App']['FetchProviderModels'](arg1, arg2);
+}
+
 export function GetActiveRequest(arg1) {
   return window['go']['main']['App']['GetActiveRequest'](arg1);
 }
@@ -96,6 +100,10 @@ export function StartProxy() {
 
 export function StopProxy() {
   return window['go']['main']['App']['StopProxy']();
+}
+
+export function TestProviderConnection(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['TestProviderConnection'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function UpdateProvider(arg1, arg2) {

@@ -101,7 +101,14 @@
                     </div>
                     <div>
                         <label class="form-label">模型</label>
-                        <input type="text" id="models" class="form-input" placeholder="deepseek-chat" required>
+                        <div class="flex space-x-2">
+                            <input type="text" id="models" class="form-input flex-1" placeholder="deepseek-chat" required>
+                            <button type="button" onclick="fetchModels()" class="btn-secondary text-sm whitespace-nowrap flex items-center space-x-1">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                                <span>查询模型</span>
+                            </button>
+                        </div>
+                        <div id="modelResults" class="model-results hidden"></div>
                     </div>
                     <div>
                         <label class="form-label">别名（可选）</label>
@@ -115,8 +122,17 @@
                     </div>
                 </div>
                 <div class="drawer-footer">
-                    <button type="button" onclick="closeModal()" class="btn-secondary">取消</button>
-                    <button type="submit" class="btn-primary">保存</button>
+                    <div class="flex items-center space-x-2">
+                        <button type="button" onclick="testConnection()" class="btn-secondary text-sm flex items-center space-x-1">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                            <span>测试连接</span>
+                        </button>
+                        <span id="testResult" class="text-sm"></span>
+                    </div>
+                    <div class="flex space-x-2">
+                        <button type="button" onclick="closeModal()" class="btn-secondary">取消</button>
+                        <button type="submit" class="btn-primary">保存</button>
+                    </div>
                 </div>
             </form>
         </div>

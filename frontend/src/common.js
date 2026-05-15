@@ -1,6 +1,7 @@
 // Wails Go 绑定调用封装
 import { GetProviders, CreateProvider, UpdateProvider, DeleteProvider,
          ExportProvidersToFile, ImportProvidersFromFile, SetupCodeBuddy,
+         FetchProviderModels, TestProviderConnection,
          GetStats, GetDailyStats, GetHourlyStatsByDate,
          GetRecentLogs, GetLogDetail,
          GetActiveRequests, GetActiveRequest,
@@ -15,6 +16,7 @@ async function callGo(methodName, ...args) {
   const methodMap = {
     GetProviders, CreateProvider, UpdateProvider, DeleteProvider,
     ExportProvidersToFile, ImportProvidersFromFile, SetupCodeBuddy,
+    FetchProviderModels, TestProviderConnection,
     GetStats, GetDailyStats, GetHourlyStatsByDate,
     GetRecentLogs, GetLogDetail,
     GetActiveRequests, GetActiveRequest,

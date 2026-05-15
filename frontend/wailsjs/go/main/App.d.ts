@@ -13,6 +13,8 @@ export function EnvFileExists():Promise<boolean>;
 
 export function ExportProvidersToFile():Promise<string>;
 
+export function FetchProviderModels(arg1:string,arg2:string):Promise<Array<string>>;
+
 export function GetActiveRequest(arg1:string):Promise<handler.ActiveRequest>;
 
 export function GetActiveRequests():Promise<Array<handler.ActiveRequest>>;
@@ -52,5 +54,7 @@ export function SetupCodeBuddy():Promise<main.CodeBuddyResultVO>;
 export function StartProxy():Promise<void>;
 
 export function StopProxy():Promise<void>;
+
+export function TestProviderConnection(arg1:string,arg2:string,arg3:string,arg4:string,arg5:boolean):Promise<string>;
 
 export function UpdateProvider(arg1:number,arg2:main.ProviderUpdateVO):Promise<main.ProviderVO>;

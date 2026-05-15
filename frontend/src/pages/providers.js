@@ -22,14 +22,17 @@ function init() {
   window.toggleApiKeyVisibility = toggleApiKeyVisibility;
   window.updateUrlPreview = updateUrlPreview;
   window.filterProviders = filterProviders;
+  window.fetchModels = fetchModels;
+  window.testConnection = testConnection;
 }
 
 function destroy() {
   // 清理全局函数
   ['openModal','closeModal','saveProvider','editProvider','duplicateProvider',
    'showDeleteModal','closeDeleteModal','confirmDelete','exportProviders',
-   'importProviders','setupCodeBuddy','onAutoSuffixChange','toggleApiKeyVisibility',
-   'updateUrlPreview','filterProviders'
+   'importProviders','setupCodeBuddy','onAutoSuffixChange',
+   'toggleApiKeyVisibility','updateUrlPreview','filterProviders','fetchModels',
+   'testConnection'
   ].forEach(fn => delete window[fn]);
 }
 
@@ -135,6 +138,17 @@ function closeModal() {
   if (suffix) suffix.style.display = 'block';
   const preview = document.getElementById('urlPreview');
   if (preview) preview.textContent = '';
+  // 重置模型查询结果和测试结果
+  const modelResults = document.getElementById('modelResults');
+  if (modelResults) {
+    modelResults.classList.add('hidden');
+    modelResults.innerHTML = '';
+  }
+  const testResult = document.getElementById('testResult');
+  if (testResult) {
+    testResult.textContent = '';
+    testResult.className = 'text-sm';
+  }
 }
 
 function editProvider(id) {
@@ -305,6 +319,82 @@ function updateUrlPreview() {
     preview.textContent = '完整URL: ' + fullURL;
   } else {
     preview.textContent = '';
+  }
+}
+
+// 查询上游 API 的可用模型列表（OpenAI 兼容格式）
+async function fetchModels() {
+  const baseURL = document.getElementById('baseURL')?.value.trim();
+  const apiKey = document.getElementById('apiKey')?.value.trim();
+  const resultsDiv = document.getElementById('modelResults');
+
+  if (!baseURL) {
+    window.showToast('请先填写 Base URL', 'error');
+    return;
+  }
+  if (!apiKey) {
+    window.showToast('请先填写 API Key', 'error');
+    return;
+  }
+
+  resultsDiv.classList.remove('hidden');
+  resultsDiv.innerHTML = '<div class="model-results-loading"><svg class="animate-spin inline w-4 h-4 mr-2" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>正在查询...</div>';
+
+  try {
+    const models = await callGo('FetchProviderModels', baseURL, apiKey);
+    resultsDiv.innerHTML = '';
+    if (models && models.length > 0) {
+      models.forEach(name => {
+        const item = document.createElement('div');
+        item.className = 'model-results-item';
+        item.textContent = name;
+        item.onclick = () => {
+          document.getElementById('models').value = name;
+          resultsDiv.classList.add('hidden');
+          resultsDiv.innerHTML = '';
+        };
+        resultsDiv.appendChild(item);
+      });
+    } else {
+      resultsDiv.innerHTML = '<div class="model-results-empty">未查询到任何模型</div>';
+    }
+  } catch (error) {
+    resultsDiv.innerHTML = `<div class="model-results-empty">查询失败: ${extractErrorMessage(error)}</div>`;
+  }
+}
+
+// 测试 Provider 连接是否可用
+async function testConnection() {
+  const baseURL = document.getElementById('baseURL')?.value.trim();
+  const apiKey = document.getElementById('apiKey')?.value.trim();
+  const model = document.getElementById('models')?.value.trim();
+  const urlSuffix = document.getElementById('urlSuffix')?.value.trim();
+  const autoSuffix = document.getElementById('autoSuffix')?.checked;
+  const resultSpan = document.getElementById('testResult');
+
+  if (!baseURL) {
+    window.showToast('请先填写 Base URL', 'error');
+    return;
+  }
+  if (!apiKey) {
+    window.showToast('请先填写 API Key', 'error');
+    return;
+  }
+  if (!model) {
+    window.showToast('请先填写模型名称', 'error');
+    return;
+  }
+
+  resultSpan.textContent = '测试中...';
+  resultSpan.className = 'text-sm text-blue-500';
+
+  try {
+    const result = await callGo('TestProviderConnection', baseURL, apiKey, model, urlSuffix, autoSuffix);
+    resultSpan.textContent = result;
+    resultSpan.className = 'text-sm ' + (result.startsWith('✅') ? 'text-green-600' : 'text-red-500');
+  } catch (error) {
+    resultSpan.textContent = '❌ ' + extractErrorMessage(error);
+    resultSpan.className = 'text-sm text-red-500';
   }
 }
 

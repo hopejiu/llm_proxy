@@ -165,7 +165,89 @@ func DataDir() string {
 	return dir
 }
 
+// migrateEnvFile 迁移并修复 .env 文件中的拼写错误
+func migrateEnvFile() {
+	envPath := EnvFilePath()
+	
+	// 读取现有 .env 文件内容
+	existing := make(map[string]string)
+	if data, err := os.ReadFile(envPath); err != nil {
+		return // 文件不存在，跳过迁移
+	} else {
+		lines := strings.Split(string(data), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				existing[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+			}
+		}
+	}
+	
+	// 定义需要迁移的拼写错误映射（错误拼写 → 正确拼写）
+	migrations := map[string]string{
+		"STREAM_MAX_RETRRIES": "STREAM_MAX_RETRIES", // 多了一个R
+		// 在这里添加其他可能的拼写错误
+	}
+	
+	modified := false
+	for wrongKey, correctKey := range migrations {
+		if val, ok := existing[wrongKey]; ok {
+			// 如果正确键不存在，则迁移
+			if _, exists := existing[correctKey]; !exists {
+				existing[correctKey] = val
+				delete(existing, wrongKey)
+				modified = true
+				slog.Info("迁移环境变量键名", "from", wrongKey, "to", correctKey)
+			} else {
+				// 如果正确键已存在，则删除错误键
+				delete(existing, wrongKey)
+				modified = true
+				slog.Info("删除重复的环境变量键", "key", wrongKey)
+			}
+		}
+	}
+	
+	// 如果有修改，写回文件
+	if modified {
+		var lines []string
+		lines = append(lines, "# LLM Proxy 配置文件")
+		lines = append(lines, "# 修改后需重启程序生效（部分配置如日志级别可实时生效）")
+		lines = append(lines, "")
+		
+		// 使用正确的键顺序
+		keyOrder := []string{
+			"DB_TYPE", "DB_PATH", "DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_NAME",
+			"PROXY_PORT", "STREAM_MAX_RETRIES",
+			"RETRY_DELAY_BASE", "PROVIDER_CACHE_TTL", "LOG_CLEANUP_DAYS", "LOG_LEVEL", "AUTO_START_PROXY",
+		}
+		
+		written := make(map[string]bool)
+		for _, key := range keyOrder {
+			if val, ok := existing[key]; ok {
+				lines = append(lines, fmt.Sprintf("%s=%s", key, val))
+				written[key] = true
+			}
+		}
+		// 写入不在 keyOrder 中的其他键
+		for key, val := range existing {
+			if !written[key] {
+				lines = append(lines, fmt.Sprintf("%s=%s", key, val))
+			}
+		}
+		
+		content := strings.Join(lines, "\n") + "\n"
+		os.WriteFile(envPath, []byte(content), 0644)
+	}
+}
+
 func Load() *Config {
+	// 迁移：修复 .env 文件中的拼写错误
+	migrateEnvFile()
+
 	// 从应用数据目录加载 .env
 	envPath := filepath.Join(DataDir(), ".env")
 	godotenv.Load(envPath)
@@ -397,6 +479,14 @@ func SaveEnvItems(items map[string]string) error {
 	// 合并新值
 	for k, v := range items {
 		existing[k] = v
+	}
+
+	// 确保所有配置项都写入.env文件（如果不存在则使用默认值）
+	allItems := GetEnvItems()
+	for _, item := range allItems {
+		if _, ok := existing[item.Key]; !ok {
+			existing[item.Key] = item.DefaultValue
+		}
 	}
 
 	// 定义写入顺序（保持和 GetEnvItems 一致）

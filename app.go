@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"llm-proxy/internal/config"
 	"llm-proxy/internal/handler"
 	"llm-proxy/internal/logger"
@@ -15,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -207,6 +210,121 @@ func (a *App) SetupCodeBuddy() (CodeBuddyResultVO, error) {
 		Added:   result.Added,
 		Models:  result.Models,
 	}, nil
+}
+
+// ========== Provider 辅助功能 ==========
+
+// FetchProviderModels 查询上游 API 的所有可用模型（OpenAI 兼容格式：GET /v1/models）
+func (a *App) FetchProviderModels(baseURL, apiKey string) ([]string, error) {
+	client := &http.Client{Timeout: 15 * time.Second}
+
+	apiURL := strings.TrimRight(baseURL, "/") + "/v1/models"
+	req, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("创建请求失败: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API返回错误(%d): %s", resp.StatusCode, string(body))
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	var models []string
+	if dataArr, ok := result["data"].([]interface{}); ok {
+		for _, m := range dataArr {
+			if modelObj, ok := m.(map[string]interface{}); ok {
+				if id, ok := modelObj["id"].(string); ok {
+					models = append(models, id)
+				}
+			}
+		}
+	}
+
+	return models, nil
+}
+
+// TestProviderConnection 测试 Provider 连接是否可用
+func (a *App) TestProviderConnection(baseURL, apiKey, model, urlSuffix string, autoSuffix bool) (string, error) {
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	// 构建请求 URL
+	var requestURL string
+	if autoSuffix {
+		base := strings.TrimRight(baseURL, "/")
+		suffix := urlSuffix
+		if suffix != "" && !strings.HasPrefix(suffix, "/") {
+			suffix = "/" + suffix
+		}
+		requestURL = base + suffix
+	} else {
+		requestURL = baseURL
+	}
+
+	if requestURL == "" {
+		return "", fmt.Errorf("请求URL为空，请填写Base URL")
+	}
+
+	// 最小请求体
+	testBody := map[string]interface{}{
+		"model": model,
+		"messages": []map[string]interface{}{
+			{"role": "user", "content": "hi"},
+		},
+		"max_tokens": 5,
+		"stream":     false,
+	}
+	body, err := json.Marshal(testBody)
+	if err != nil {
+		return "", fmt.Errorf("构建请求体失败: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", requestURL, bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("创建请求失败: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("连接失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode == http.StatusOK {
+		return "✅ 连接成功，API 返回正常", nil
+	} else {
+		// 尝试解析错误响应
+		var errResp map[string]interface{}
+		errMsg := string(respBody)
+		if json.Unmarshal(respBody, &errResp) == nil {
+			if msg, ok := errResp["error"].(map[string]interface{}); ok {
+				if message, ok := msg["message"].(string); ok {
+					errMsg = message
+				}
+			}
+		}
+		return fmt.Sprintf("❌ API返回错误(%d): %s", resp.StatusCode, errMsg), nil
+	}
 }
 
 // ========== Stats 相关 ==========

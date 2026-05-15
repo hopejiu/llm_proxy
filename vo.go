@@ -105,7 +105,7 @@ func providerToVO(p *model.ProviderConfig) ProviderVO {
 		AutoSuffix:  p.AutoSuffix,
 		UrlSuffix:   p.UrlSuffix,
 		BaseURL:     p.BaseURL,
-		APIKey:      p.MaskAPIKey(),
+		APIKey:      p.APIKey,
 		Model:       p.Model,
 		Alias:       p.Alias,
 		ExtraParams: p.ExtraParams,

@@ -243,7 +243,7 @@ body {
 
 .drawer-footer {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 12px;
   padding-top: 20px;
   border-top: 1px solid #E2E8F0;
@@ -1097,6 +1097,48 @@ input:checked + .toggle-slider:before {
   font-size: 14px;
   font-weight: 500;
   transition: all 0.2s ease;
+}
+
+/* Provider 模型查询结果列表 */
+.model-results {
+  margin-top: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid #E2E8F0;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.model-results-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-primary);
+  border-bottom: 1px solid #F1F5F9;
+  transition: background 0.15s ease;
+}
+
+.model-results-item:last-child {
+  border-bottom: none;
+}
+
+.model-results-item:hover {
+  background: #F5F3FF;
+  color: var(--primary);
+}
+
+.model-results-loading {
+  padding: 12px;
+  text-align: center;
+  color: #94A3B8;
+  font-size: 13px;
+}
+
+.model-results-empty {
+  padding: 12px;
+  text-align: center;
+  color: #EF4444;
+  font-size: 13px;
 }
 
 .sidebar-item:hover {
