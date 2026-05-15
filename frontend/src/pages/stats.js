@@ -9,6 +9,21 @@ let rawStats = { today: {}, week: {}, total: {} };
 let dailyStatsCache = [];
 let resizeHandler = null;
 
+// 持久化 key
+const STORAGE_KEY = 'stats_settings';
+
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return { autoRefresh: false };
+}
+
+function saveSettings(settings) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); } catch (e) {}
+}
+
 function init() {
   currentHourlyDate = formatDateLocal(new Date());
   updateHourlyDateLabel();
@@ -16,6 +31,14 @@ function init() {
   loadRecentLogs();
   loadHourlyStats();
   loadDailyStats();
+
+  // 恢复自动刷新开关 UI 状态
+  const settings = loadSettings();
+  const switchEl = document.getElementById('autoRefreshSwitch');
+  if (switchEl) switchEl.checked = settings.autoRefresh;
+  if (settings.autoRefresh) {
+    autoRefreshInterval = setInterval(() => { refreshAll(); }, 10000);
+  }
 
   // 点击外部关闭日期下拉
   document.addEventListener('click', closeHourlyDateDropdownOnOutside);
@@ -280,6 +303,7 @@ function toggleAutoRefresh() {
     if (autoRefreshInterval) { clearInterval(autoRefreshInterval); autoRefreshInterval = null; }
     window.showToast('已关闭自动刷新', 'success');
   }
+  saveSettings({ ...loadSettings(), autoRefresh: enabled });
 }
 
 function getCurrentHourlyDate() { return currentHourlyDate || formatDateLocal(new Date()); }

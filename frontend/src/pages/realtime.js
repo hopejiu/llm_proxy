@@ -3,10 +3,38 @@ import { callGo, escapeHtml, formatNumber, formatTime, formatTimeNow, getProtoco
 let autoRefreshInterval = null;
 let refreshIntervalMs = 2000;
 
+// 持久化 key
+const STORAGE_KEY = 'realtime_settings';
+
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return { autoRefresh: true, interval: 2 };
+}
+
+function saveSettings(settings) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); } catch (e) {}
+}
+
 function init() {
+  const settings = loadSettings();
+  refreshIntervalMs = settings.interval * 1000;
+
   loadActiveRequests();
   loadRecentLogs();
-  startAutoRefresh();
+
+  // 恢复开关和间隔 UI 状态
+  const switchEl = document.getElementById('autoRefreshSwitch');
+  const intervalEl = document.getElementById('intervalSelect');
+  const displayEl = document.getElementById('intervalDisplay');
+  if (switchEl) switchEl.checked = settings.autoRefresh;
+  if (intervalEl) intervalEl.value = String(settings.interval);
+  if (displayEl) displayEl.textContent = settings.interval;
+
+  if (settings.autoRefresh) startAutoRefresh();
+
   window.refreshAll = refreshAll;
   window.toggleAutoRefresh = toggleAutoRefresh;
   window.changeInterval = changeInterval;
@@ -33,6 +61,7 @@ function toggleAutoRefresh() {
   const enabled = document.getElementById('autoRefreshSwitch')?.checked;
   if (enabled) { startAutoRefresh(); window.showToast('已开启自动刷新', 'success'); }
   else { stopAutoRefresh(); window.showToast('已关闭自动刷新', 'success'); }
+  saveSettings({ ...loadSettings(), autoRefresh: enabled });
 }
 
 function startAutoRefresh() {
@@ -51,6 +80,7 @@ function changeInterval() {
   const display = document.getElementById('intervalDisplay');
   if (display) display.textContent = seconds;
   if (document.getElementById('autoRefreshSwitch')?.checked) startAutoRefresh();
+  saveSettings({ ...loadSettings(), interval: seconds });
 }
 
 async function loadActiveRequests() {
