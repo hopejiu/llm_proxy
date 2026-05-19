@@ -21,11 +21,13 @@ export function GetActiveRequests():Promise<Array<handler.ActiveRequest>>;
 
 export function GetDBFallbackMsg():Promise<string>;
 
-export function GetDailyStats():Promise<Array<model.TokenStats>>;
+export function GetDailyStats(arg1:number):Promise<Array<model.TokenStats>>;
 
 export function GetEnvConfig():Promise<Array<config.EnvItem>>;
 
-export function GetHourlyStatsByDate(arg1:string):Promise<Array<model.HourlyStatsResult>>;
+export function GetHourlyStatsByDate(arg1:string,arg2:number):Promise<Array<model.HourlyStatsResult>>;
+
+export function GetHourlyStatsByDateWithBreakdown(arg1:string):Promise<Array<main.HourlyStatBreakdownVO>>;
 
 export function GetLogDetail(arg1:number):Promise<main.RequestLogDetailVO>;
 
@@ -41,7 +43,7 @@ export function GetProxyStatus():Promise<main.ProxyStatusVO>;
 
 export function GetRecentLogs(arg1:number):Promise<Array<main.RequestLogVO>>;
 
-export function GetStats():Promise<Record<string, model.TokenStats>>;
+export function GetStats(arg1:number):Promise<Record<string, model.TokenStats>>;
 
 export function GetVersion():Promise<Record<string, string>>;
 

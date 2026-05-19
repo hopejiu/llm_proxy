@@ -15,6 +15,16 @@
     </div>
 </div>
 
+<!-- Provider 筛选器 -->
+<div class="flex items-center mb-6 animate-fade-in">
+    <div class="flex items-center space-x-3">
+        <label class="text-sm font-medium text-gray-600">Provider：</label>
+        <select id="providerFilter" onchange="onProviderChange()" class="form-input" style="min-width: 180px; padding: 8px 12px; border-radius: 8px; border: 1px solid #e5e7eb; background: white; font-size: 14px;">
+            <option value="0">全部 Provider</option>
+        </select>
+    </div>
+</div>
+
 <!-- 概览卡片 -->
 <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8 animate-fade-in">
     <div class="stats-card">

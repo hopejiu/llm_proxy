@@ -34,16 +34,20 @@ export function GetDBFallbackMsg() {
   return window['go']['main']['App']['GetDBFallbackMsg']();
 }
 
-export function GetDailyStats() {
-  return window['go']['main']['App']['GetDailyStats']();
+export function GetDailyStats(arg1) {
+  return window['go']['main']['App']['GetDailyStats'](arg1);
 }
 
 export function GetEnvConfig() {
   return window['go']['main']['App']['GetEnvConfig']();
 }
 
-export function GetHourlyStatsByDate(arg1) {
-  return window['go']['main']['App']['GetHourlyStatsByDate'](arg1);
+export function GetHourlyStatsByDate(arg1, arg2) {
+  return window['go']['main']['App']['GetHourlyStatsByDate'](arg1, arg2);
+}
+
+export function GetHourlyStatsByDateWithBreakdown(arg1) {
+  return window['go']['main']['App']['GetHourlyStatsByDateWithBreakdown'](arg1);
 }
 
 export function GetLogDetail(arg1) {
@@ -74,8 +78,8 @@ export function GetRecentLogs(arg1) {
   return window['go']['main']['App']['GetRecentLogs'](arg1);
 }
 
-export function GetStats() {
-  return window['go']['main']['App']['GetStats']();
+export function GetStats(arg1) {
+  return window['go']['main']['App']['GetStats'](arg1);
 }
 
 export function GetVersion() {

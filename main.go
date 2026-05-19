@@ -88,7 +88,7 @@ func main() {
 
 	proxyService := service.NewProxyService(providerRepo, cfg)
 	providerService := service.NewProviderService(providerRepo, proxyService)
-	statsService := service.NewStatsService(hourlyStatRepo, requestLogRepo)
+	statsService := service.NewStatsService(hourlyStatRepo, requestLogRepo, providerService)
 
 	tracker := handler.NewActiveRequestTracker()
 
@@ -250,6 +250,9 @@ func migrateDB(db *gorm.DB, cfg *config.Config) {
 		}
 	}
 
+	// 升级 hourly_stats 表：添加 provider_id 列并更新索引
+	migrateHourlyStats(db, cfg)
+
 	createIndexesIfNotExist(db, cfg)
 	slog.Info("数据库表初始化完成")
 }
@@ -291,6 +294,7 @@ func createSQLiteTablesIfNotExist(db *gorm.DB) {
 		`CREATE TABLE IF NOT EXISTS hourly_stats (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			hour DATETIME NOT NULL,
+			provider_id INTEGER NOT NULL DEFAULT 0,
 			input_tokens INTEGER,
 			output_tokens INTEGER,
 			total_tokens INTEGER,
@@ -320,6 +324,37 @@ func createIndexesIfNotExist(db *gorm.DB, cfg *config.Config) {
 			slog.Warn("创建索引失败", "sql", idx, "error", err)
 		}
 	}
+}
+
+// migrateHourlyStats 升级 hourly_stats 表，添加 provider_id 列并重建唯一索引
+func migrateHourlyStats(db *gorm.DB, cfg *config.Config) {
+	// 检查 provider_id 列是否已存在
+	if !cfg.IsSQLite() && db.Migrator().HasColumn(&model.HourlyStat{}, "provider_id") {
+		return
+	}
+	if cfg.IsSQLite() {
+		// SQLite 中检查列是否存在的方法
+		var cols []string
+		db.Raw("PRAGMA table_info(hourly_stats)").Pluck("name", &cols)
+		for _, c := range cols {
+			if c == "provider_id" {
+				return
+			}
+		}
+	}
+
+	slog.Info("正在升级 hourly_stats 表，添加 provider_id 列...")
+
+	if err := db.Exec("ALTER TABLE hourly_stats ADD COLUMN provider_id INTEGER NOT NULL DEFAULT 0").Error; err != nil {
+		slog.Warn("添加 provider_id 列失败（可能已存在）", "error", err)
+	}
+
+	// 尝试删除旧的唯一索引
+	if err := db.Exec("DROP INDEX IF EXISTS idx_hourly_stats_hour").Error; err != nil {
+		slog.Warn("删除旧索引 idx_hourly_stats_hour 失败", "error", err)
+	}
+
+	slog.Info("hourly_stats 表升级完成")
 }
 
 // cleanOldData 清理旧数据

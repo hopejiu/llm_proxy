@@ -161,6 +161,28 @@ export namespace main {
 	        this.models = source["models"];
 	    }
 	}
+	export class HourlyStatBreakdownVO {
+	    hour: number;
+	    provider_id: number;
+	    provider_name: string;
+	    input_tokens: number;
+	    output_tokens: number;
+	    total_tokens: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new HourlyStatBreakdownVO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.hour = source["hour"];
+	        this.provider_id = source["provider_id"];
+	        this.provider_name = source["provider_name"];
+	        this.input_tokens = source["input_tokens"];
+	        this.output_tokens = source["output_tokens"];
+	        this.total_tokens = source["total_tokens"];
+	    }
+	}
 	export class LogEntryVO {
 	    time: string;
 	    level: string;
