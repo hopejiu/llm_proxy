@@ -308,7 +308,7 @@ func (h *BaseHandler) ExtractUsage(data map[string]interface{}) (inputTokens, ou
 // SendRequestWithRetry 发送普通 HTTP 请求（带重试）
 func (h *BaseHandler) SendRequestWithRetry(ctx context.Context, url string, body []byte, apiKey string, maxRetries int) ([]byte, error) {
 	var lastErr error
-	for attempt := 1; attempt <= maxRetries; attempt++ {
+	for attempt := 1; attempt <= maxRetries+1; attempt++ {
 		if attempt > 1 {
 			retryDelay := time.Duration(attempt) * h.cfg.GetRetryDelayBase()
 			slog.Debug("非流式请求重试", "url", url, "attempt", attempt, "maxRetries", maxRetries, "delay", retryDelay)
@@ -422,7 +422,7 @@ func (h *BaseHandler) ExecuteStreamWithRetry(
 	config StreamRetryConfig,
 	processor StreamLineProcessor,
 ) (responseBuilder strings.Builder, tokens StreamTokens, lastErr error) {
-	for attempt := 1; attempt <= config.MaxRetries; attempt++ {
+	for attempt := 1; attempt <= config.MaxRetries+1; attempt++ {
 		if attempt > 1 {
 			// 重试前清空上次的部分数据
 			responseBuilder.Reset()

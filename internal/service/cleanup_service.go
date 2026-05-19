@@ -41,8 +41,8 @@ func (s *CleanupService) aggregateHour(hourStart time.Time) error {
 		return err
 	}
 
-	// 没有未汇总的数据则跳过
-	if len(stats) == 0 {
+	// 没有未汇总的数据则跳过（AggregateHour 即使无数据也会返回一条全零全量行）
+	if len(stats) == 0 || (len(stats) == 1 && stats[0].RequestCount == 0) {
 		return nil
 	}
 
