@@ -145,7 +145,7 @@ func (h *WebHandler) DeleteProvider(c *gin.Context) {
 
 // GetStats 获取统计数据
 func (h *WebHandler) GetStats(c *gin.Context) {
-	stats, err := h.statsService.GetDashboardStats()
+	stats, err := h.statsService.GetDashboardStats(0)
 	if err != nil {
 		slog.Error("获取仪表盘统计失败", "error", err)
 		respondError(c, http.StatusInternalServerError, CodeInternal, "获取统计数据失败")
@@ -156,7 +156,7 @@ func (h *WebHandler) GetStats(c *gin.Context) {
 
 // GetDailyStats 获取每日统计
 func (h *WebHandler) GetDailyStats(c *gin.Context) {
-	stats, err := h.statsService.GetLast30DaysStats()
+	stats, err := h.statsService.GetLast30DaysStats(0)
 	if err != nil {
 		slog.Error("获取30天统计失败", "error", err)
 		respondError(c, http.StatusInternalServerError, CodeInternal, "获取每日统计失败")
@@ -251,7 +251,7 @@ func (h *WebHandler) GetTodayHourlyStats(c *gin.Context) {
 
 	if dateStr == "" {
 		// 默认今日
-		stats, err := h.statsService.GetTodayHourlyStats()
+		stats, err := h.statsService.GetTodayHourlyStats(0)
 		if err != nil {
 			slog.Error("获取今日分时统计失败", "error", err)
 			respondError(c, http.StatusInternalServerError, CodeInternal, "获取分时统计失败")
@@ -269,7 +269,7 @@ func (h *WebHandler) GetTodayHourlyStats(c *gin.Context) {
 		return
 	}
 
-	stats, err := h.statsService.GetHourlyStatsByDate(date)
+	stats, err := h.statsService.GetHourlyStatsByDate(date, 0)
 	if err != nil {
 		slog.Error("获取指定日期分时统计失败", "date", dateStr, "error", err)
 		respondError(c, http.StatusInternalServerError, CodeInternal, "获取分时统计失败")

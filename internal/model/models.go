@@ -101,7 +101,8 @@ type TokenStats struct {
 // HourlyStat 每小时汇总统计（仅统计成功请求）
 type HourlyStat struct {
 	ID            uint      `json:"id" gorm:"primaryKey"`
-	Hour          time.Time `json:"hour" gorm:"uniqueIndex;not null"` // 小时起始时间，唯一索引
+	Hour          time.Time `json:"hour" gorm:"uniqueIndex:idx_hour_provider;not null"` // 小时起始时间
+	ProviderID    uint      `json:"provider_id" gorm:"uniqueIndex:idx_hour_provider;not null;default:0"` // 0=全量, >0=具体Provider
 	InputTokens   int64     `json:"input_tokens"`
 	OutputTokens  int64     `json:"output_tokens"`
 	TotalTokens   int64     `json:"total_tokens"`

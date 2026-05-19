@@ -93,6 +93,16 @@ type CodeBuddyResultVO struct {
 	Models  int    `json:"models"`
 }
 
+// HourlyStatBreakdownVO 分时按 Provider 拆分的详细视图（用于堆叠图）
+type HourlyStatBreakdownVO struct {
+	Hour         int    `json:"hour"`
+	ProviderID   uint   `json:"provider_id"`
+	ProviderName string `json:"provider_name"`
+	InputTokens  int64  `json:"input_tokens"`
+	OutputTokens int64  `json:"output_tokens"`
+	TotalTokens  int64  `json:"total_tokens"`
+}
+
 // ActiveRequestVO 活跃请求视图，直接复用 handler.ActiveRequest
 type ActiveRequestVO = handler.ActiveRequest
 

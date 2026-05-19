@@ -330,8 +330,8 @@ func (a *App) TestProviderConnection(baseURL, apiKey, model, urlSuffix string, a
 // ========== Stats 相关 ==========
 
 // GetStats 获取仪表盘统计
-func (a *App) GetStats() (map[string]*model.TokenStats, error) {
-	stats, err := a.statsService.GetDashboardStats()
+func (a *App) GetStats(providerID uint) (map[string]*model.TokenStats, error) {
+	stats, err := a.statsService.GetDashboardStats(providerID)
 	if err != nil {
 		slog.Error("获取仪表盘统计失败", "error", err)
 		return nil, NewAppError("INTERNAL", "获取统计数据失败")
@@ -340,8 +340,8 @@ func (a *App) GetStats() (map[string]*model.TokenStats, error) {
 }
 
 // GetDailyStats 获取 30 天每日统计
-func (a *App) GetDailyStats() ([]model.TokenStats, error) {
-	stats, err := a.statsService.GetLast30DaysStats()
+func (a *App) GetDailyStats(providerID uint) ([]model.TokenStats, error) {
+	stats, err := a.statsService.GetLast30DaysStats(providerID)
 	if err != nil {
 		slog.Error("获取30天统计失败", "error", err)
 		return nil, NewAppError("INTERNAL", "获取每日统计失败")
@@ -350,9 +350,9 @@ func (a *App) GetDailyStats() ([]model.TokenStats, error) {
 }
 
 // GetHourlyStatsByDate 获取分时统计
-func (a *App) GetHourlyStatsByDate(date string) ([]model.HourlyStatsResult, error) {
+func (a *App) GetHourlyStatsByDate(date string, providerID uint) ([]model.HourlyStatsResult, error) {
 	if date == "" {
-		stats, err := a.statsService.GetTodayHourlyStats()
+		stats, err := a.statsService.GetTodayHourlyStats(providerID)
 		if err != nil {
 			return nil, NewAppError("INTERNAL", "获取分时统计失败")
 		}
@@ -364,11 +364,37 @@ func (a *App) GetHourlyStatsByDate(date string) ([]model.HourlyStatsResult, erro
 		return nil, NewAppError("BAD_REQUEST", "日期格式错误，应为 YYYY-MM-DD")
 	}
 
-	stats, err := a.statsService.GetHourlyStatsByDate(parsedDate)
+	stats, err := a.statsService.GetHourlyStatsByDate(parsedDate, providerID)
 	if err != nil {
 		return nil, NewAppError("INTERNAL", "获取分时统计失败")
 	}
 	return stats, nil
+}
+
+// GetHourlyStatsByDateWithBreakdown 获取按 provider 拆分的分时统计（用于堆叠图）
+func (a *App) GetHourlyStatsByDateWithBreakdown(date string) ([]HourlyStatBreakdownVO, error) {
+	if date == "" {
+		date = time.Now().Format("2006-01-02")
+	}
+
+	items, err := a.statsService.GetHourlyStatsByDateWithBreakdown(date)
+	if err != nil {
+		slog.Error("获取拆分统计失败", "error", err)
+		return nil, NewAppError("INTERNAL", "获取拆分统计失败")
+	}
+
+	result := make([]HourlyStatBreakdownVO, len(items))
+	for i, item := range items {
+		result[i] = HourlyStatBreakdownVO{
+			Hour:         item.Hour,
+			ProviderID:   item.ProviderID,
+			ProviderName: item.ProviderName,
+			InputTokens:  item.InputTokens,
+			OutputTokens: item.OutputTokens,
+			TotalTokens:  item.TotalTokens,
+		}
+	}
+	return result, nil
 }
 
 // ========== Logs 相关 ==========

@@ -8,6 +8,9 @@ let currentHourlyDate = '';
 let rawStats = { today: {}, week: {}, total: {} };
 let dailyStatsCache = [];
 let resizeHandler = null;
+let currentProviderID = 0;
+let providerList = [];
+let providerColorMap = {};
 
 // 持久化 key
 const STORAGE_KEY = 'stats_settings';
@@ -24,9 +27,10 @@ function saveSettings(settings) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); } catch (e) {}
 }
 
-function init() {
+async function init() {
   currentHourlyDate = formatDateLocal(new Date());
   updateHourlyDateLabel();
+  await loadProviders();
   loadStats();
   loadRecentLogs();
   loadHourlyStats();
@@ -59,6 +63,7 @@ function init() {
   window.selectHourlyDate = selectHourlyDate;
   window.changeHourlyDate = changeHourlyDate;
   window.goToTodayHourly = goToTodayHourly;
+  window.onProviderChange = onProviderChange;
 }
 
 function destroy() {
@@ -68,8 +73,10 @@ function destroy() {
   if (resizeHandler) window.removeEventListener('resize', resizeHandler);
   document.removeEventListener('click', closeHourlyDateDropdownOnOutside);
   ['refreshAll','switchChartDimension','toggleAutoRefresh','showLogDetail',
-   'toggleHourlyDateDropdown','selectHourlyDate','changeHourlyDate','goToTodayHourly'
+   'toggleHourlyDateDropdown','selectHourlyDate','changeHourlyDate','goToTodayHourly',
+   'onProviderChange'
   ].forEach(fn => delete window[fn]);
+  providerColorMap = {};
 }
 
 function closeHourlyDateDropdownOnOutside(e) {
@@ -87,9 +94,31 @@ async function refreshAll() {
   finally { btn?.classList.remove('spinning'); }
 }
 
+// 加载 Provider 下拉选项
+async function loadProviders() {
+  try {
+    const providers = await callGo('GetProviders');
+    providerList = providers;
+    const select = document.getElementById('providerFilter');
+    if (!select) return;
+    select.innerHTML = '<option value="0">全部 Provider</option>' +
+      providers.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+    select.value = String(currentProviderID);
+  } catch (e) { console.error('Failed to load providers:', e); }
+}
+
+// Provider 筛选变更
+function onProviderChange() {
+  const select = document.getElementById('providerFilter');
+  currentProviderID = parseInt(select?.value || '0');
+  loadStats();
+  loadHourlyStats(getCurrentHourlyDate());
+  loadDailyStats();
+}
+
 async function loadStats() {
   try {
-    const stats = await callGo('GetStats');
+    const stats = await callGo('GetStats', currentProviderID);
     rawStats.today = stats.today || {};
     rawStats.week = stats.week || {};
     rawStats.total = stats.total || {};
@@ -113,7 +142,7 @@ async function loadStats() {
 
 async function loadDailyStats() {
   try {
-    const stats = await callGo('GetDailyStats');
+    const stats = await callGo('GetDailyStats', currentProviderID);
     dailyStatsCache = stats;
     const filledStats = fillMissingDays(stats, 7);
     renderChart(filledStats);
@@ -125,7 +154,7 @@ async function loadDailyStats() {
 
 async function loadHourlyStats(date) {
   try {
-    const stats = await callGo('GetHourlyStatsByDate', date || '');
+    const stats = await callGo('GetHourlyStatsByDate', date || '', currentProviderID);
     renderHourlyChart(stats, date);
   } catch (e) { console.error('Failed to load hourly stats:', e); window.showToast('分时统计加载失败', 'error'); }
 }
@@ -237,6 +266,60 @@ function switchChartDimension(dimension, btn) {
   renderChart(fillMissingDays(dailyStatsCache, 7));
 }
 
+function getProviderColor(providerId) {
+  const colors = ['#7C3AED', '#F59E0B', '#10B981', '#EF4444', '#3B82F6', '#EC4899', '#14B8A6', '#F97316'];
+  if (!providerColorMap[providerId]) {
+    const idx = Object.keys(providerColorMap).length % colors.length;
+    providerColorMap[providerId] = colors[idx];
+  }
+  return providerColorMap[providerId];
+}
+
+async function renderHourlyStackedChart(chart, maxHour, date) {
+  const dateStr = date || formatDateLocal(new Date());
+  let breakdownData;
+  try {
+    breakdownData = await callGo('GetHourlyStatsByDateWithBreakdown', dateStr);
+  } catch (e) {
+    console.error('Failed to load breakdown data:', e);
+    return;
+  }
+
+  const hourMap = {};
+  for (const item of breakdownData) {
+    if (!hourMap[item.hour]) hourMap[item.hour] = {};
+    hourMap[item.hour][item.provider_id] = item.total_tokens;
+  }
+
+  const hourData = [];
+  for (let i = 0; i <= maxHour; i++) {
+    hourData.push(`${i}:00`);
+  }
+
+  const providerIds = [...new Set(breakdownData.map(d => d.provider_id))];
+  const providerNames = {};
+  for (const item of breakdownData) {
+    providerNames[item.provider_id] = item.provider_name;
+  }
+
+  const series = providerIds.map(pid => ({
+    name: providerNames[pid] || `Provider ${pid}`,
+    type: 'bar',
+    stack: 'total',
+    data: hourData.map((_, i) => hourMap[i]?.[pid] || 0),
+    itemStyle: { color: getProviderColor(pid), borderRadius: [0, 0, 0, 0] }
+  }));
+
+  chart.setOption({
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    legend: { data: series.map(s => s.name), bottom: 0 },
+    grid: { left: '3%', right: '4%', bottom: '12%', top: '10%', containLabel: true },
+    xAxis: { type: 'category', data: hourData },
+    yAxis: { type: 'value', name: 'Token', axisLabel: { formatter: v => v >= 10000 ? (v / 10000).toFixed(0) + '万' : v } },
+    series: series
+  });
+}
+
 function renderHourlyChart(stats, date) {
   const chartDom = document.getElementById('hourlyChart');
   if (!chartDom) return;
@@ -246,6 +329,13 @@ function renderHourlyChart(stats, date) {
   const isToday = !date || date === todayStr;
   const currentHour = new Date().getHours();
   const maxHour = isToday ? Math.min(currentHour, 23) : 23;
+
+  if (currentProviderID === 0 && providerList.length > 0) {
+    // 全部 Provider → 堆叠图
+    renderHourlyStackedChart(hourlyChartInstance, maxHour, date);
+    return;
+  }
+
   const hourData = [], tokenData = [], requestData = [];
   for (let i = 0; i <= maxHour; i++) {
     const hourStat = stats.find(s => s.hour === i);

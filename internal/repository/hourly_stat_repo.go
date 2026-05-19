@@ -31,7 +31,8 @@ func (r *HourlyStatRepository) Upsert(stat *model.HourlyStat) error {
 // upsertSQLite 使用 SQLite 的 INSERT OR REPLACE 原子操作
 func (r *HourlyStatRepository) upsertSQLite(stat *model.HourlyStat) error {
 	// 先尝试插入，如果冲突则累加更新
-	result := r.db.Where("hour = ?", stat.Hour).First(&model.HourlyStat{})
+	var existing model.HourlyStat
+	result := r.db.Where("hour = ? AND provider_id = ?", stat.Hour, stat.ProviderID).First(&existing)
 	if result.Error == gorm.ErrRecordNotFound {
 		return r.db.Create(stat).Error
 	}
@@ -40,7 +41,7 @@ func (r *HourlyStatRepository) upsertSQLite(stat *model.HourlyStat) error {
 	}
 	// 累加更新
 	return r.db.Model(&model.HourlyStat{}).
-		Where("hour = ?", stat.Hour).
+		Where("hour = ? AND provider_id = ?", stat.Hour, stat.ProviderID).
 		Updates(map[string]interface{}{
 			"input_tokens":   gorm.Expr("input_tokens + ?", stat.InputTokens),
 			"output_tokens":  gorm.Expr("output_tokens + ?", stat.OutputTokens),
@@ -55,8 +56,8 @@ func (r *HourlyStatRepository) upsertSQLite(stat *model.HourlyStat) error {
 func (r *HourlyStatRepository) upsertMySQL(stat *model.HourlyStat) error {
 	now := time.Now()
 	return r.db.Exec(`
-		INSERT INTO hourly_stats (hour, input_tokens, output_tokens, total_tokens, cached_tokens, request_count, total_duration, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO hourly_stats (hour, provider_id, input_tokens, output_tokens, total_tokens, cached_tokens, request_count, total_duration, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE
 			input_tokens = input_tokens + VALUES(input_tokens),
 			output_tokens = output_tokens + VALUES(output_tokens),
@@ -65,7 +66,7 @@ func (r *HourlyStatRepository) upsertMySQL(stat *model.HourlyStat) error {
 			request_count = request_count + VALUES(request_count),
 			total_duration = total_duration + VALUES(total_duration),
 			updated_at = VALUES(updated_at)
-	`, stat.Hour, stat.InputTokens, stat.OutputTokens, stat.TotalTokens, stat.CachedTokens, stat.RequestCount, stat.TotalDuration, now, now).Error
+	`, stat.Hour, stat.ProviderID, stat.InputTokens, stat.OutputTokens, stat.TotalTokens, stat.CachedTokens, stat.RequestCount, stat.TotalDuration, now, now).Error
 }
 
 // GetByHourRange 获取指定时间范围内的汇总记录
@@ -78,7 +79,7 @@ func (r *HourlyStatRepository) GetByHourRange(start, end time.Time) ([]model.Hou
 }
 
 // GetDashboardStats 从汇总表获取仪表盘统计（历史已完成小时）
-func (r *HourlyStatRepository) GetDashboardStats() (todayStats, weekStats, totalStats *model.TokenStats, err error) {
+func (r *HourlyStatRepository) GetDashboardStats(providerID uint) (todayStats, weekStats, totalStats *model.TokenStats, err error) {
 	now := time.Now()
 	today := now.Truncate(24 * time.Hour)
 	weekday := int(now.Weekday())
@@ -89,7 +90,7 @@ func (r *HourlyStatRepository) GetDashboardStats() (todayStats, weekStats, total
 
 	// 一次查询获取所有汇总数据，在内存中分桶
 	var stats []model.HourlyStat
-	if err = r.db.Where("hour < ?", currentHourStart()).Find(&stats).Error; err != nil {
+	if err = r.db.Where("hour < ? AND provider_id = ?", currentHourStart(), providerID).Find(&stats).Error; err != nil {
 		return
 	}
 
@@ -128,10 +129,10 @@ func (r *HourlyStatRepository) GetDashboardStats() (todayStats, weekStats, total
 }
 
 // GetDailyStats 从汇总表获取每日统计
-func (r *HourlyStatRepository) GetDailyStats(days int) ([]model.TokenStats, error) {
+func (r *HourlyStatRepository) GetDailyStats(days int, providerID uint) ([]model.TokenStats, error) {
 	startDate := time.Now().AddDate(0, 0, -days)
 	var stats []model.HourlyStat
-	if err := r.db.Where("hour >= ?", startDate.Truncate(24*time.Hour)).Find(&stats).Error; err != nil {
+	if err := r.db.Where("hour >= ? AND provider_id = ?", startDate.Truncate(24*time.Hour), providerID).Find(&stats).Error; err != nil {
 		return nil, err
 	}
 
@@ -162,10 +163,10 @@ func (r *HourlyStatRepository) GetDailyStats(days int) ([]model.TokenStats, erro
 }
 
 // GetTodayHourlyStats 从汇总表获取今日已完成小时的分时统计
-func (r *HourlyStatRepository) GetTodayHourlyStats() ([]model.HourlyStatsResult, error) {
+func (r *HourlyStatRepository) GetTodayHourlyStats(providerID uint) ([]model.HourlyStatsResult, error) {
 	today := time.Now().Truncate(24 * time.Hour)
 	var stats []model.HourlyStat
-	if err := r.db.Where("hour >= ? AND hour < ?", today, currentHourStart()).Find(&stats).Error; err != nil {
+	if err := r.db.Where("hour >= ? AND hour < ? AND provider_id = ?", today, currentHourStart(), providerID).Find(&stats).Error; err != nil {
 		return nil, err
 	}
 
@@ -184,7 +185,7 @@ func (r *HourlyStatRepository) GetTodayHourlyStats() ([]model.HourlyStatsResult,
 }
 
 // GetHourlyStatsByDate 获取指定日期的分时统计（历史日期从汇总表读取，今日追加当前小时实时数据）
-func (r *HourlyStatRepository) GetHourlyStatsByDate(date time.Time) ([]model.HourlyStatsResult, error) {
+func (r *HourlyStatRepository) GetHourlyStatsByDate(date time.Time, providerID uint) ([]model.HourlyStatsResult, error) {
 	dayStart := date.Truncate(24 * time.Hour)
 	dayEnd := dayStart.Add(24 * time.Hour)
 	now := time.Now()
@@ -195,10 +196,10 @@ func (r *HourlyStatRepository) GetHourlyStatsByDate(date time.Time) ([]model.Hou
 
 	if isToday {
 		// 今日：汇总表已完成小时
-		err = r.db.Where("hour >= ? AND hour < ?", dayStart, currentHourStart()).Find(&stats).Error
+		err = r.db.Where("hour >= ? AND hour < ? AND provider_id = ?", dayStart, currentHourStart(), providerID).Find(&stats).Error
 	} else {
 		// 历史日期：汇总表全天
-		err = r.db.Where("hour >= ? AND hour < ?", dayStart, dayEnd).Find(&stats).Error
+		err = r.db.Where("hour >= ? AND hour < ? AND provider_id = ?", dayStart, dayEnd, providerID).Find(&stats).Error
 	}
 	if err != nil {
 		return nil, err
@@ -240,6 +241,39 @@ func (r *HourlyStatRepository) GetMissingHours(start, end time.Time) ([]time.Tim
 		}
 	}
 	return missing, nil
+}
+
+// GetMissingProviderHours 获取指定范围内缺失 per-provider 汇总的小时列表
+func (r *HourlyStatRepository) GetMissingProviderHours(start, end time.Time) ([]time.Time, error) {
+	var existingHours []time.Time
+	if err := r.db.Model(&model.HourlyStat{}).
+		Where("hour >= ? AND hour < ? AND provider_id > 0", start, end).
+		Pluck("hour", &existingHours).Error; err != nil {
+		return nil, err
+	}
+
+	existingSet := make(map[time.Time]struct{})
+	for _, h := range existingHours {
+		existingSet[h.Truncate(time.Hour)] = struct{}{}
+	}
+
+	var missing []time.Time
+	for h := start; h.Before(end); h = h.Add(time.Hour) {
+		truncated := h.Truncate(time.Hour)
+		if _, ok := existingSet[truncated]; !ok {
+			missing = append(missing, truncated)
+		}
+	}
+	return missing, nil
+}
+
+// GetHourlyStatsWithBreakdown 获取指定范围内按 (hour, provider_id) 拆分的详细数据
+func (r *HourlyStatRepository) GetHourlyStatsWithBreakdown(start, end time.Time) ([]model.HourlyStat, error) {
+	var stats []model.HourlyStat
+	err := r.db.Where("hour >= ? AND hour < ? AND provider_id > 0", start, end).
+		Order("hour asc, provider_id asc").
+		Find(&stats).Error
+	return stats, err
 }
 
 // currentHourStart 返回当前小时的起始时间
