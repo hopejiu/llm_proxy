@@ -1,4 +1,4 @@
-import { callGo, escapeHtml, pad, showToast } from '../common.js';
+import { callGo, escapeHtml, pad, showToast, preserveScroll } from '../common.js';
 
 let allLogs = [];
 let paused = false;
@@ -99,11 +99,13 @@ function renderLogs() {
 
   const wasAtBottom = body.scrollTop + body.clientHeight >= body.scrollHeight - 20;
 
-  body.innerHTML = displayLogs.map(l => {
-    const time = l.time ? formatLogTime(l.time) : '';
-    const level = (l.level || 'info').toLowerCase();
-    return `<div class="log-line"><span class="log-line-time">${time}</span><span class="log-line-level ${level}">${level.toUpperCase()}</span><span class="log-line-msg">${escapeHtml(l.message)}</span></div>`;
-  }).join('');
+  preserveScroll(body, () => {
+    body.innerHTML = displayLogs.map(l => {
+      const time = l.time ? formatLogTime(l.time) : '';
+      const level = (l.level || 'info').toLowerCase();
+      return `<div class="log-line"><span class="log-line-time">${time}</span><span class="log-line-level ${level}">${level.toUpperCase()}</span><span class="log-line-msg">${escapeHtml(l.message)}</span></div>`;
+    }).join('');
+  });
 
   if (wasAtBottom) body.scrollTop = body.scrollHeight;
 }

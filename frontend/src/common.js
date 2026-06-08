@@ -50,6 +50,27 @@ function extractErrorMessage(err) {
   return err.message || String(err);
 }
 
+// 保持页面滚动位置：在 DOM 更新前后保持滚动位置不丢失
+// 用法: preserveScroll(container, () => { container.innerHTML = ... })
+// container 可选，默认为 document.documentElement（页面级滚动）
+function preserveScroll(container, renderFn) {
+  // 判断是页面级滚动还是容器内滚动
+  const isPageScroll = !container || container === document.documentElement || container === document.body;
+  const scrollTop = isPageScroll
+    ? (document.documentElement.scrollTop || document.body.scrollTop)
+    : container.scrollTop;
+
+  renderFn();
+
+  // 恢复滚动位置
+  if (isPageScroll) {
+    document.documentElement.scrollTop = scrollTop;
+    document.body.scrollTop = scrollTop; // 兼容旧浏览器
+  } else {
+    container.scrollTop = scrollTop;
+  }
+}
+
 // 格式化数字
 function formatNumber(num) {
   if (num === undefined || num === null || num === 0) return '0';
@@ -164,5 +185,6 @@ function showToast(message, type = 'success') {
 export {
   callGo, escapeHtml, extractErrorMessage, formatNumber, pad,
   formatTime, formatTimeNow, formatDateLocal, extractDateString,
-  formatCompactNumber, getProtocolTag, showLogDetail, showToast
+  formatCompactNumber, getProtocolTag, showLogDetail, showToast,
+  preserveScroll
 };

@@ -1,4 +1,4 @@
-import { callGo, escapeHtml, formatNumber, formatTime, formatTimeNow, getProtocolTag, showLogDetail } from '../common.js';
+import { callGo, escapeHtml, formatNumber, formatTime, formatTimeNow, getProtocolTag, showLogDetail, preserveScroll } from '../common.js';
 
 let autoRefreshInterval = null;
 let refreshIntervalMs = 2000;
@@ -104,7 +104,8 @@ function renderActiveRequests(requests) {
     return;
   }
 
-  container.innerHTML = requests.map(req => {
+  preserveScroll(null, () => {
+    container.innerHTML = requests.map(req => {
     const elapsed = ((Date.now() - new Date(req.start_time).getTime()) / 1000).toFixed(1);
     const statusTag = req.status === 'streaming' ? '<span class="tag tag-primary">流式中</span>' : '<span class="tag tag-warn">等待中</span>';
     const protocolTag = getProtocolTag(req.protocol);
@@ -132,6 +133,7 @@ function renderActiveRequests(requests) {
       <div class="active-request-progress"><div class="active-request-progress-bar ${req.status === 'streaming' ? 'streaming' : 'pending'}"></div></div>
     </div>`;
   }).join('');
+  });
 }
 
 async function loadRecentLogs() {
@@ -165,21 +167,23 @@ function renderRecentLogs(logs) {
     tbody.innerHTML = '<tr><td colspan="10"><div class="empty-state"><p>暂无请求记录</p></div></td></tr>';
     return;
   }
-  tbody.innerHTML = logs.map(log => {
-    const durationSeconds = log.duration > 0 ? (log.duration / 1000).toFixed(1) + 's' : '-';
-    return `<tr>
-      <td>${formatTime(log.created_at)}</td>
-      <td>${escapeHtml(log.provider_name) || '-'}</td>
-      <td>${escapeHtml(log.model)}</td>
-      <td>${formatNumber(log.input_tokens)}</td>
-      <td>${formatNumber(log.output_tokens)}</td>
-      <td class="text-green-600">${formatNumber(log.cached_tokens)}</td>
-      <td class="font-semibold text-purple-600">${formatNumber(log.total_tokens)}</td>
-      <td>${durationSeconds}</td>
-      <td>${log.status === 'success' ? '<span class="tag tag-success">成功</span>' : '<span class="tag tag-error">失败</span>'}</td>
-      <td><button onclick="showLogDetail(${log.id})" class="text-purple-600 hover:text-purple-800 text-sm">查看</button></td>
-    </tr>`;
-  }).join('');
+  preserveScroll(null, () => {
+    tbody.innerHTML = logs.map(log => {
+      const durationSeconds = log.duration > 0 ? (log.duration / 1000).toFixed(1) + 's' : '-';
+      return `<tr>
+        <td>${formatTime(log.created_at)}</td>
+        <td>${escapeHtml(log.provider_name) || '-'}</td>
+        <td>${escapeHtml(log.model)}</td>
+        <td>${formatNumber(log.input_tokens)}</td>
+        <td>${formatNumber(log.output_tokens)}</td>
+        <td class="text-green-600">${formatNumber(log.cached_tokens)}</td>
+        <td class="font-semibold text-purple-600">${formatNumber(log.total_tokens)}</td>
+        <td>${durationSeconds}</td>
+        <td>${log.status === 'success' ? '<span class="tag tag-success">成功</span>' : '<span class="tag tag-error">失败</span>'}</td>
+        <td><button onclick="showLogDetail(${log.id})" class="text-purple-600 hover:text-purple-800 text-sm">查看</button></td>
+      </tr>`;
+    }).join('');
+  });
 }
 
 async function showActiveDetail(requestID) {
