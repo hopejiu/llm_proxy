@@ -26,3 +26,4 @@ build/bin
 node_modules
 frontend/dist
 frontend/node_modules
+.v3
