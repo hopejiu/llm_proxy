@@ -95,16 +95,23 @@ type RequestLogDetailVO struct {
 	ResponseBody    string `json:"response_body"`
 }
 
-type HourlyStatBreakdownVO struct {
-	Hour         int    `json:"hour"`
-	ProviderID   uint   `json:"provider_id"`
-	ProviderName string `json:"provider_name"`
-	InputTokens  int64  `json:"input_tokens"`
-	OutputTokens int64  `json:"output_tokens"`
-	TotalTokens  int64  `json:"total_tokens"`
-}
+// HourlyStatBreakdownVO 分时详细拆分（堆叠图用），复用 model 层定义
+type HourlyStatBreakdownVO = model.HourlyBreakdownItem
 
 type ActiveRequestVO = handler.ActiveRequest
+
+// ModelStatVO 模型级别统计（前端用于计算成本）
+type ModelStatVO struct {
+	Date              string `json:"date"`
+	ProviderID        uint   `json:"provider_id"`
+	ProviderName      string `json:"provider_name"`
+	Model             string `json:"model"`
+	TotalInputTokens  int64  `json:"total_input_tokens"`
+	TotalOutputTokens int64  `json:"total_output_tokens"`
+	TotalTokens       int64  `json:"total_tokens"`
+	TotalCachedTokens int64  `json:"total_cached_tokens"`
+	RequestCount      int64  `json:"request_count"`
+}
 
 func requestLogToVO(log *model.RequestLog) RequestLogVO {
 	return RequestLogVO{

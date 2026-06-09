@@ -4,20 +4,20 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"unicode/utf8"
 	"encoding/json"
 	"fmt"
-	"io"
 	"github.com/wanglejiu/llm-proxy/internal/config"
 	"github.com/wanglejiu/llm-proxy/internal/converter"
 	"github.com/wanglejiu/llm-proxy/internal/model"
 	"github.com/wanglejiu/llm-proxy/internal/repository"
 	"github.com/wanglejiu/llm-proxy/internal/service"
+	"io"
 	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 )
@@ -27,9 +27,9 @@ type requestIDKey struct{}
 
 // ProxyRequestInfo 代理请求的公共信息
 type ProxyRequestInfo struct {
-	Model       string
-	Stream      bool
-	Protocol    string // "openai" | "anthropic" | "ollama"
+	Model    string
+	Stream   bool
+	Protocol string // "openai" | "anthropic" | "ollama"
 }
 
 // ParseRequestFunc 解析请求体的回调，返回请求信息或错误
@@ -67,7 +67,7 @@ func (h *BaseHandler) HandleProxyRequest(
 		return
 	}
 
-	// 注册活跃请求
+	// 注册活跃请求 — 提前解析 Provider，消除时序间隙
 	tracker := h.tracker
 	activeReq := &ActiveRequest{
 		RequestID:   requestID,
@@ -80,6 +80,14 @@ func (h *BaseHandler) HandleProxyRequest(
 	}
 	if reqInfo.Stream {
 		activeReq.Status = "streaming"
+	}
+	// 尝试提前解析 Provider，使实时页面立即显示完整信息
+	if provider, err := h.GetProviderByModel(reqInfo.Model); err == nil {
+		activeReq.ProviderID = provider.ID
+		activeReq.Provider = provider.Name
+		if resolved := provider.ResolveModel(reqInfo.Model); resolved != "" {
+			activeReq.Model = resolved
+		}
 	}
 	tracker.Add(activeReq)
 	defer tracker.Remove(requestID)
@@ -385,7 +393,9 @@ func (h *BaseHandler) SaveRequestLog(reqLog *model.RequestLog) {
 	}
 }
 
-// CreateRequestLog 创建请求日志对象，模型名从改写后的请求体中提取
+// CreateRequestLog 创建请求日志对象。
+// reqBody 应为经 PrepareRequestBody 改写后的请求体（非原始客户端请求体），
+// 其中 model 字段已解析为上游模型名（非客户端 alias），写入 RequestLog.Model。
 func (h *BaseHandler) CreateRequestLog(provider model.ProviderConfig, reqBody string) *model.RequestLog {
 	var reqInfo struct {
 		Model string `json:"model"`

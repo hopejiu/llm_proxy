@@ -1,11 +1,13 @@
 import { type ReactNode } from "react";
 import { useLogDetail } from "../hooks/useLogs";
 import Modal from "./Modal";
+import { fmtYuan } from "../utils/cost";
 
 interface RecentRequestsTableProps {
   logs: any[];
   onViewDetail?: (id: number) => void;
   showTps?: boolean;
+  showCost?: boolean;
   emptyText?: string;
 }
 
@@ -13,7 +15,7 @@ function formatDuration(ms: number): string {
   return ms > 0 ? `${(ms / 1000).toFixed(1)}s` : "-";
 }
 
-export default function RecentRequestsTable({ logs, showTps = false, emptyText = "暂无请求记录" }: RecentRequestsTableProps) {
+export default function RecentRequestsTable({ logs, showTps = false, showCost = false, emptyText = "暂无请求记录" }: RecentRequestsTableProps) {
   const { detail: ld, fetch: fl, clear: cl } = useLogDetail();
 
   const cols = [
@@ -27,6 +29,7 @@ export default function RecentRequestsTable({ logs, showTps = false, emptyText =
     { key: "total_tokens", label: "Total", className: "text-right font-mono text-xs font-bold text-brand-700" },
     { key: "duration", label: "耗时", className: "text-right font-mono text-xs" },
     ...(showTps ? [{ key: "tps" as const, label: "Token/s", className: "text-right font-mono text-xs text-brand-600 font-medium" }] : []),
+    ...(showCost ? [{ key: "_cost" as const, label: "花费", className: "text-right font-mono text-xs text-emerald-600" }] : []),
     { key: "status", label: "状态", className: "text-center" },
     { key: "", label: "操作", className: "text-center" },
   ];
@@ -48,6 +51,7 @@ export default function RecentRequestsTable({ logs, showTps = false, emptyText =
     if (key === "created_at") return log.created_at;
     if (key === "model") return log.model;
     if (key === "provider_name") return log.provider_name || "-";
+    if (key === "_cost") return fmtYuan(log._cost || 0);
     if (["input_tokens", "output_tokens", "cached_tokens", "total_tokens"].includes(key)) {
       const val = log[key];
       return val != null ? Number(val).toLocaleString() : "-";

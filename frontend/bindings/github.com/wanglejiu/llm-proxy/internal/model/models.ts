@@ -6,6 +6,54 @@
 import { Create as $Create } from "@wailsio/runtime";
 
 /**
+ * HourlyBreakdownItem 分时详细拆分行，包含模型维度（用于堆叠图）
+ */
+export class HourlyBreakdownItem {
+    "hour": number;
+    "provider_id": number;
+    "provider_name": string;
+    "model": string;
+    "input_tokens": number;
+    "output_tokens": number;
+    "total_tokens": number;
+
+    /** Creates a new HourlyBreakdownItem instance. */
+    constructor($$source: Partial<HourlyBreakdownItem> = {}) {
+        if (!("hour" in $$source)) {
+            this["hour"] = 0;
+        }
+        if (!("provider_id" in $$source)) {
+            this["provider_id"] = 0;
+        }
+        if (!("provider_name" in $$source)) {
+            this["provider_name"] = "";
+        }
+        if (!("model" in $$source)) {
+            this["model"] = "";
+        }
+        if (!("input_tokens" in $$source)) {
+            this["input_tokens"] = 0;
+        }
+        if (!("output_tokens" in $$source)) {
+            this["output_tokens"] = 0;
+        }
+        if (!("total_tokens" in $$source)) {
+            this["total_tokens"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new HourlyBreakdownItem instance from a string or object.
+     */
+    static createFrom($$source: any = {}): HourlyBreakdownItem {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new HourlyBreakdownItem($$parsedSource as Partial<HourlyBreakdownItem>);
+    }
+}
+
+/**
  * HourlyStatsResult 分时统计结果
  */
 export class HourlyStatsResult {

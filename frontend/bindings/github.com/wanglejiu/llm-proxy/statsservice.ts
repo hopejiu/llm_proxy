@@ -49,6 +49,15 @@ export function GetDailyStats(providerID: number): $CancellablePromise<model$0.T
 }
 
 /**
+ * GetHourlyModelStats 获取指定日期指定模型的分时统计
+ */
+export function GetHourlyModelStats(date: string, providerID: number, modelName: string): $CancellablePromise<model$0.HourlyStatsResult[]> {
+    return $Call.ByID(3859796019, date, providerID, modelName).then(($result: any) => {
+        return $$createType5($result);
+    });
+}
+
+/**
  * GetHourlyStatsByDate 获取分时统计
  */
 export function GetHourlyStatsByDate(date: string, providerID: number): $CancellablePromise<model$0.HourlyStatsResult[]> {
@@ -58,10 +67,11 @@ export function GetHourlyStatsByDate(date: string, providerID: number): $Cancell
 }
 
 /**
- * GetHourlyStatsByDateWithBreakdown 获取按 provider 拆分的分时统计（用于堆叠图）
+ * GetHourlyStatsByDateWithBreakdown 获取按 provider+model 拆分的分时统计（用于堆叠图）
+ * providerID=0 时返回所有 provider 的数据，providerID>0 时只返回指定 provider 的数据
  */
-export function GetHourlyStatsByDateWithBreakdown(date: string): $CancellablePromise<$models.HourlyStatBreakdownVO[]> {
-    return $Call.ByID(3542509878, date).then(($result: any) => {
+export function GetHourlyStatsByDateWithBreakdown(date: string, providerID: number): $CancellablePromise<$models.HourlyStatBreakdownVO[]> {
+    return $Call.ByID(3542509878, date, providerID).then(($result: any) => {
         return $$createType7($result);
     });
 }
@@ -76,11 +86,20 @@ export function GetLogDetail(id: number): $CancellablePromise<$models.RequestLog
 }
 
 /**
- * GetRecentLogs 获取最近请求日志
+ * GetModelStats 获取模型级别统计（用于前端计算成本）
  */
-export function GetRecentLogs(limit: number): $CancellablePromise<$models.RequestLogVO[]> {
-    return $Call.ByID(3158810798, limit).then(($result: any) => {
+export function GetModelStats(providerID: number): $CancellablePromise<$models.ModelStatVO[]> {
+    return $Call.ByID(1616811742, providerID).then(($result: any) => {
         return $$createType10($result);
+    });
+}
+
+/**
+ * GetRecentLogs 获取最近请求日志，modelName 非空时按模型名过滤
+ */
+export function GetRecentLogs(limit: number, modelName: string): $CancellablePromise<$models.RequestLogVO[]> {
+    return $Call.ByID(3158810798, limit, modelName).then(($result: any) => {
+        return $$createType12($result);
     });
 }
 
@@ -89,7 +108,7 @@ export function GetRecentLogs(limit: number): $CancellablePromise<$models.Reques
  */
 export function GetStats(providerID: number): $CancellablePromise<{ [_ in string]?: model$0.TokenStats | null }> {
     return $Call.ByID(802081133, providerID).then(($result: any) => {
-        return $$createType12($result);
+        return $$createType14($result);
     });
 }
 
@@ -100,10 +119,12 @@ const $$createType2 = model$0.TokenStats.createFrom;
 const $$createType3 = $Create.Array($$createType2);
 const $$createType4 = model$0.HourlyStatsResult.createFrom;
 const $$createType5 = $Create.Array($$createType4);
-const $$createType6 = $models.HourlyStatBreakdownVO.createFrom;
+const $$createType6 = model$0.HourlyBreakdownItem.createFrom;
 const $$createType7 = $Create.Array($$createType6);
 const $$createType8 = $models.RequestLogDetailVO.createFrom;
-const $$createType9 = $models.RequestLogVO.createFrom;
+const $$createType9 = $models.ModelStatVO.createFrom;
 const $$createType10 = $Create.Array($$createType9);
-const $$createType11 = $Create.Nullable($$createType2);
-const $$createType12 = $Create.Map($Create.Any, $$createType11);
+const $$createType11 = $models.RequestLogVO.createFrom;
+const $$createType12 = $Create.Array($$createType11);
+const $$createType13 = $Create.Nullable($$createType2);
+const $$createType14 = $Create.Map($Create.Any, $$createType13);

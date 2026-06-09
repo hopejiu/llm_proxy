@@ -17,10 +17,12 @@ export const StatsAPI = {
   getStats: (providerID = 0) => StatsService.GetStats(providerID),
   getDailyStats: (providerID = 0) => StatsService.GetDailyStats(providerID).then((r: any) => r || []),
   getHourlyStatsByDate: (date: string, providerID = 0) => StatsService.GetHourlyStatsByDate(date, providerID).then((r: any) => r || []),
-  getHourlyStatsByDateWithBreakdown: (date: string) => StatsService.GetHourlyStatsByDateWithBreakdown(date).then((r: any) => r || []),
+  getHourlyStatsByDateWithBreakdown: (date: string, providerID = 0) => StatsService.GetHourlyStatsByDateWithBreakdown(date, providerID).then((r: any) => r || []),
+  getHourlyModelStats: (date: string, providerID: number, model: string) => StatsService.GetHourlyModelStats(date, providerID, model).then((r: any) => r || []),
+  getModelStats: (providerID = 0) => StatsService.GetModelStats(providerID).then((r: any) => r || []),
   getActiveRequests: () => StatsService.GetActiveRequests().then((r: any) => r || []),
   getActiveRequest: (reqId: string) => StatsService.GetActiveRequest(reqId),
-  getRecentLogs: (limit = 20) => StatsService.GetRecentLogs(limit).then((r: any) => r || []),
+  getRecentLogs: (limit = 20, modelName = "") => StatsService.GetRecentLogs(limit, modelName).then((r: any) => r || []),
   getLogDetail: (id: number) => StatsService.GetLogDetail(id),
 };
 

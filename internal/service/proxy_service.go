@@ -3,13 +3,14 @@ package service
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/wanglejiu/llm-proxy/internal/config"
-	"github.com/wanglejiu/llm-proxy/internal/model"
-	"github.com/wanglejiu/llm-proxy/internal/repository"
 	"log/slog"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/wanglejiu/llm-proxy/internal/config"
+	"github.com/wanglejiu/llm-proxy/internal/model"
+	"github.com/wanglejiu/llm-proxy/internal/repository"
 )
 
 // ProxyService 代理服务
@@ -90,13 +91,22 @@ func (s *ProxyService) GetProviderByModel(modelName string) (model.ProviderConfi
 		return model.ProviderConfig{}, fmt.Errorf("no provider available")
 	}
 
-	// 遍历所有 Provider，查找匹配的 ModelEntry
 	for i := range providers {
-		if entry := providers[i].FindModelEntry(modelName); entry != nil {
-			return providers[i], nil
+		for _, m := range providers[i].ParseModels() {
+			for _, al := range m.Aliases {
+				if al == modelName {
+					return providers[i], nil
+				}
+			}
 		}
 	}
-
+	for i := range providers {
+		for _, m := range providers[i].ParseModels() {
+			if modelName == m.Name {
+				return providers[i], nil
+			}
+		}
+	}
 	// 构建可用模型列表用于错误提示
 	var available []string
 	for _, p := range providers {
@@ -147,5 +157,3 @@ func (s *ProxyService) PrepareRequestBody(reqBody []byte, provider model.Provide
 	}
 	return reqBody
 }
-
-

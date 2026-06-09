@@ -14,8 +14,8 @@ func NewLogService(requestLogRepo *repository.RequestLogRepository) *LogService 
 }
 
 // GetRecentLogs 获取最近的请求日志
-func (s *LogService) GetRecentLogs(limit int) ([]model.RequestLog, error) {
-	return s.requestLogRepo.GetRecent(limit)
+func (s *LogService) GetRecentLogs(limit int, modelName string) ([]model.RequestLog, error) {
+	return s.requestLogRepo.GetRecent(limit, modelName)
 }
 
 // GetLogDetail 获取单条请求日志详情

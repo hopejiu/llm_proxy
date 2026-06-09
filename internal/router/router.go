@@ -3,8 +3,6 @@ package router
 import (
 	"github.com/wanglejiu/llm-proxy/internal/handler"
 	"github.com/wanglejiu/llm-proxy/internal/middleware"
-	"log/slog"
-	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
@@ -34,20 +32,4 @@ func SetupProxy(h *handler.ProxyHandler, ah *handler.AnthropicHandler, oh *handl
 	r.NoRoute(h.NotFound)
 
 	return r
-}
-
-// StartServer 启动 HTTP 服务
-func StartServer(port string, engine *gin.Engine) *http.Server {
-	server := &http.Server{
-		Addr:    ":" + port,
-		Handler: engine,
-	}
-
-	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("HTTP服务启动失败", "addr", server.Addr, "error", err)
-		}
-	}()
-
-	return server
 }

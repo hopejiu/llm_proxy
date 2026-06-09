@@ -87,34 +87,15 @@ func (s *CleanupService) BackfillMissingHours() error {
 	}
 
 	if len(missing) > 0 {
-		slog.Info("开始回填全局汇总数据", "missingCount", len(missing), "from", missing[0], "to", missing[len(missing)-1])
+		slog.Info("开始回填汇总数据", "missingCount", len(missing), "from", missing[0], "to", missing[len(missing)-1])
 
 		for _, hourStart := range missing {
 			if err := s.aggregateHour(hourStart); err != nil {
-				slog.Warn("回填全局小时数据失败，继续下一个", "hour", hourStart, "error", err)
+				slog.Warn("回填小时数据失败，继续下一个", "hour", hourStart, "error", err)
 			}
 		}
 
-		slog.Info("全局汇总数据回填完成", "totalHours", len(missing))
-	}
-
-	// 获取 per-provider 汇总缺失的小时
-	missingProvider, err := s.hourlyStatRepo.GetMissingProviderHours(startHour, endHour)
-	if err != nil {
-		slog.Error("获取 per-provider 缺失小时失败", "error", err)
-		return err
-	}
-
-	if len(missingProvider) > 0 {
-		slog.Info("开始回填 per-provider 汇总数据", "missingCount", len(missingProvider))
-
-		for _, hourStart := range missingProvider {
-			if err := s.aggregateHour(hourStart); err != nil {
-				slog.Warn("回填 per-provider 小时数据失败，继续下一个", "hour", hourStart, "error", err)
-			}
-		}
-
-		slog.Info("per-provider 汇总数据回填完成", "totalHours", len(missingProvider))
+		slog.Info("汇总数据回填完成", "totalHours", len(missing))
 	}
 
 	return nil

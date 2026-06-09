@@ -8,6 +8,9 @@ import { Create as $Create } from "@wailsio/runtime";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
 import * as handler$0 from "./internal/handler/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as model$0 from "./internal/model/models.js";
 
 export const ActiveRequestVO = handler$0.ActiveRequest;
 export type ActiveRequestVO = handler$0.ActiveRequest;
@@ -49,46 +52,15 @@ export class CodeBuddyResultVO {
     }
 }
 
-export class HourlyStatBreakdownVO {
-    "hour": number;
-    "provider_id": number;
-    "provider_name": string;
-    "input_tokens": number;
-    "output_tokens": number;
-    "total_tokens": number;
+/**
+ * HourlyStatBreakdownVO 分时详细拆分（堆叠图用），复用 model 层定义
+ */
+export const HourlyStatBreakdownVO = model$0.HourlyBreakdownItem;
 
-    /** Creates a new HourlyStatBreakdownVO instance. */
-    constructor($$source: Partial<HourlyStatBreakdownVO> = {}) {
-        if (!("hour" in $$source)) {
-            this["hour"] = 0;
-        }
-        if (!("provider_id" in $$source)) {
-            this["provider_id"] = 0;
-        }
-        if (!("provider_name" in $$source)) {
-            this["provider_name"] = "";
-        }
-        if (!("input_tokens" in $$source)) {
-            this["input_tokens"] = 0;
-        }
-        if (!("output_tokens" in $$source)) {
-            this["output_tokens"] = 0;
-        }
-        if (!("total_tokens" in $$source)) {
-            this["total_tokens"] = 0;
-        }
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new HourlyStatBreakdownVO instance from a string or object.
-     */
-    static createFrom($$source: any = {}): HourlyStatBreakdownVO {
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        return new HourlyStatBreakdownVO($$parsedSource as Partial<HourlyStatBreakdownVO>);
-    }
-}
+/**
+ * HourlyStatBreakdownVO 分时详细拆分（堆叠图用），复用 model 层定义
+ */
+export type HourlyStatBreakdownVO = model$0.HourlyBreakdownItem;
 
 export class LogEntryVO {
     "time": string;
@@ -116,6 +88,62 @@ export class LogEntryVO {
     static createFrom($$source: any = {}): LogEntryVO {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new LogEntryVO($$parsedSource as Partial<LogEntryVO>);
+    }
+}
+
+/**
+ * ModelStatVO 模型级别统计（前端用于计算成本）
+ */
+export class ModelStatVO {
+    "date": string;
+    "provider_id": number;
+    "provider_name": string;
+    "model": string;
+    "total_input_tokens": number;
+    "total_output_tokens": number;
+    "total_tokens": number;
+    "total_cached_tokens": number;
+    "request_count": number;
+
+    /** Creates a new ModelStatVO instance. */
+    constructor($$source: Partial<ModelStatVO> = {}) {
+        if (!("date" in $$source)) {
+            this["date"] = "";
+        }
+        if (!("provider_id" in $$source)) {
+            this["provider_id"] = 0;
+        }
+        if (!("provider_name" in $$source)) {
+            this["provider_name"] = "";
+        }
+        if (!("model" in $$source)) {
+            this["model"] = "";
+        }
+        if (!("total_input_tokens" in $$source)) {
+            this["total_input_tokens"] = 0;
+        }
+        if (!("total_output_tokens" in $$source)) {
+            this["total_output_tokens"] = 0;
+        }
+        if (!("total_tokens" in $$source)) {
+            this["total_tokens"] = 0;
+        }
+        if (!("total_cached_tokens" in $$source)) {
+            this["total_cached_tokens"] = 0;
+        }
+        if (!("request_count" in $$source)) {
+            this["request_count"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ModelStatVO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ModelStatVO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ModelStatVO($$parsedSource as Partial<ModelStatVO>);
     }
 }
 

@@ -38,10 +38,15 @@ func (r *RequestLogRepository) GetByID(id uint) (*model.RequestLog, error) {
 }
 
 // GetRecent 获取最近的日志（排除 longtext 大字段，批量预加载 Provider 信息）
-func (r *RequestLogRepository) GetRecent(limit int) ([]model.RequestLog, error) {
+// modelName 非空时按模型名过滤
+func (r *RequestLogRepository) GetRecent(limit int, modelName string) ([]model.RequestLog, error) {
 	var logs []model.RequestLog
-	err := r.db.Select("id, provider_id, model, input_tokens, output_tokens, total_tokens, cached_tokens, status, error_message, duration, created_at").
-		Order("created_at desc").Limit(limit).Find(&logs).Error
+	q := r.db.Select("id, provider_id, model, input_tokens, output_tokens, total_tokens, cached_tokens, status, error_message, duration, created_at").
+		Order("created_at desc")
+	if modelName != "" {
+		q = q.Where("model = ?", modelName)
+	}
+	err := q.Limit(limit).Find(&logs).Error
 	if err != nil {
 		return logs, err
 	}
@@ -112,13 +117,17 @@ func (r *RequestLogRepository) fillProviderInfo(log *model.RequestLog) {
 	log.Provider = resolveProvider(log.ProviderID, providerMap)
 }
 
-// AggregateHour 汇总指定小时的明细数据，返回 per-provider 的 HourlyStat 列表
-// 只汇总 aggregated=false 且 status=success 的记录，含 provider_id=0 的全量行
+// AggregateHour 汇总指定小时的明细数据，返回 per-(provider,model) 的 HourlyStat 列表
+// 只汇总 aggregated=false 且 status=success 的记录。生成：
+//   - 每条 (provider_id, model) 组合一行
+//   - 每个 provider_id 的合计行 (model="")
+//   - 全量行 (provider_id=0, model="")
 func (r *RequestLogRepository) AggregateHour(hourStart time.Time) ([]model.HourlyStat, error) {
 	hourEnd := hourStart.Add(time.Hour)
 
 	type AggResult struct {
 		ProviderID    uint
+		Model         string
 		InputTokens   int64
 		OutputTokens  int64
 		TotalTokens   int64
@@ -129,21 +138,24 @@ func (r *RequestLogRepository) AggregateHour(hourStart time.Time) ([]model.Hourl
 
 	var results []AggResult
 	err := r.db.Model(&model.RequestLog{}).
-		Select("provider_id, COALESCE(SUM(input_tokens), 0) as input_tokens, COALESCE(SUM(output_tokens), 0) as output_tokens, COALESCE(SUM(total_tokens), 0) as total_tokens, COALESCE(SUM(cached_tokens), 0) as cached_tokens, COUNT(*) as request_count, COALESCE(SUM(duration), 0) as total_duration").
+		Select("provider_id, COALESCE(NULLIF(model, ''), 'unknown') as model, COALESCE(SUM(input_tokens), 0) as input_tokens, COALESCE(SUM(output_tokens), 0) as output_tokens, COALESCE(SUM(total_tokens), 0) as total_tokens, COALESCE(SUM(cached_tokens), 0) as cached_tokens, COUNT(*) as request_count, COALESCE(SUM(duration), 0) as total_duration").
 		Where("created_at >= ? AND created_at < ? AND aggregated = ? AND status = ?", hourStart, hourEnd, false, "success").
-		Group("provider_id").
+		Group("provider_id, model").
 		Scan(&results).Error
 	if err != nil {
 		return nil, err
 	}
 
-	stats := make([]model.HourlyStat, 0, len(results)+1)
+	// 按 (provider_id, model) 的行 + per-provider 合计行 + 全量行
+	providerTotals := make(map[uint]*model.HourlyStat)
+	stats := make([]model.HourlyStat, 0, len(results)+len(providerTotals)+1)
 
-	var totalInput, totalOutput, totalToken, totalCached, totalCount, totalDuration int64
 	for _, r := range results {
+		// 具体模型行
 		stats = append(stats, model.HourlyStat{
 			Hour:          hourStart,
 			ProviderID:    r.ProviderID,
+			Model:         r.Model,
 			InputTokens:   r.InputTokens,
 			OutputTokens:  r.OutputTokens,
 			TotalTokens:   r.TotalTokens,
@@ -151,15 +163,34 @@ func (r *RequestLogRepository) AggregateHour(hourStart time.Time) ([]model.Hourl
 			RequestCount:  r.RequestCount,
 			TotalDuration: r.TotalDuration,
 		})
-		totalInput += r.InputTokens
-		totalOutput += r.OutputTokens
-		totalToken += r.TotalTokens
-		totalCached += r.CachedTokens
-		totalCount += r.RequestCount
-		totalDuration += r.TotalDuration
+
+		// 累加 provider 合计
+		if _, ok := providerTotals[r.ProviderID]; !ok {
+			providerTotals[r.ProviderID] = &model.HourlyStat{
+				Hour: hourStart, ProviderID: r.ProviderID, Model: "",
+			}
+		}
+		pt := providerTotals[r.ProviderID]
+		pt.InputTokens += r.InputTokens
+		pt.OutputTokens += r.OutputTokens
+		pt.TotalTokens += r.TotalTokens
+		pt.CachedTokens += r.CachedTokens
+		pt.RequestCount += r.RequestCount
+		pt.TotalDuration += r.TotalDuration
 	}
 
-	// 全量行 (provider_id=0)
+	var totalInput, totalOutput, totalToken, totalCached, totalCount, totalDuration int64
+	for _, pt := range providerTotals {
+		stats = append(stats, *pt)
+		totalInput += pt.InputTokens
+		totalOutput += pt.OutputTokens
+		totalToken += pt.TotalTokens
+		totalCached += pt.CachedTokens
+		totalCount += pt.RequestCount
+		totalDuration += pt.TotalDuration
+	}
+
+	// 全量行 (provider_id=0, model="")
 	stats = append(stats, model.HourlyStat{
 		Hour:          hourStart,
 		ProviderID:    0,
@@ -183,7 +214,9 @@ func (r *RequestLogRepository) MarkAggregated(hourStart time.Time) error {
 }
 
 // GetCurrentHourStats 获取当前小时的实时统计（用于混合查询保证实时性）
-func (r *RequestLogRepository) GetCurrentHourStats(providerID uint) (*model.TokenStats, error) {
+// providerID=0 时查询所有 provider，providerID>0 时只查询指定 provider
+// modelName 非空时额外按模型名过滤
+func (r *RequestLogRepository) GetCurrentHourStats(providerID uint, modelName string) (*model.TokenStats, error) {
 	hourStart := time.Now().Truncate(time.Hour)
 	var stats model.TokenStats
 
@@ -202,6 +235,10 @@ func (r *RequestLogRepository) GetCurrentHourStats(providerID uint) (*model.Toke
 	if providerID > 0 {
 		query += " AND provider_id = ?"
 		args = append(args, providerID)
+	}
+	if modelName != "" {
+		query += " AND model = ?"
+		args = append(args, modelName)
 	}
 
 	err := r.db.Raw(query, args...).Scan(&stats).Error
@@ -242,7 +279,8 @@ func (r *RequestLogRepository) GetCurrentHourHourlyStats(providerID uint) (*mode
 }
 
 // GetHourlyStatsByDateFromLogs 从明细表获取指定日期的分时统计（用于历史日期无汇总数据时的回退查询）
-func (r *RequestLogRepository) GetHourlyStatsByDateFromLogs(date time.Time) ([]model.HourlyStatsResult, error) {
+// providerID=0 时查询所有 provider，providerID>0 时只查询指定 provider
+func (r *RequestLogRepository) GetHourlyStatsByDateFromLogs(date time.Time, providerID uint) ([]model.HourlyStatsResult, error) {
 	dayStart := date.Truncate(24 * time.Hour)
 	dayEnd := dayStart.Add(24 * time.Hour)
 
@@ -253,8 +291,8 @@ func (r *RequestLogRepository) GetHourlyStatsByDateFromLogs(date time.Time) ([]m
 		hourExpr = "EXTRACT(HOUR FROM created_at)"
 	}
 
-	var results []model.HourlyStatsResult
-	err := r.db.Raw(fmt.Sprintf(`
+	args := []interface{}{dayStart, dayEnd}
+	query := fmt.Sprintf(`
 		SELECT
 			%s as hour,
 			COUNT(*) as request_count,
@@ -264,10 +302,18 @@ func (r *RequestLogRepository) GetHourlyStatsByDateFromLogs(date time.Time) ([]m
 			COALESCE(SUM(cached_tokens), 0) as cached_tokens
 		FROM request_logs
 		WHERE created_at >= ? AND created_at < ?
-			AND status = 'success'
+			AND status = 'success'`, hourExpr)
+	if providerID > 0 {
+		query += " AND provider_id = ?"
+		args = append(args, providerID)
+	}
+	query += fmt.Sprintf(`
 		GROUP BY %s
 		ORDER BY hour
-	`, hourExpr, hourExpr), dayStart, dayEnd).Scan(&results).Error
+	`, hourExpr)
+
+	var results []model.HourlyStatsResult
+	err := r.db.Raw(query, args...).Scan(&results).Error
 	return results, err
 }
 
@@ -296,23 +342,107 @@ func (r *RequestLogRepository) DeleteOldRequestLogs(days int) (int64, error) {
 	return result.RowsAffected, result.Error
 }
 
-// CurrentHourBreakdown 当前小时按 provider 拆分的实时统计结果
+// CurrentHourBreakdown 当前小时按 (provider, model) 拆分的实时统计结果
 type CurrentHourBreakdown struct {
-	ProviderID   uint  `json:"provider_id"`
-	InputTokens  int64 `json:"input_tokens"`
-	OutputTokens int64 `json:"output_tokens"`
-	TotalTokens  int64 `json:"total_tokens"`
+	ProviderID   uint   `json:"provider_id"`
+	Model        string `json:"model"`
+	InputTokens  int64  `json:"input_tokens"`
+	OutputTokens int64  `json:"output_tokens"`
+	TotalTokens  int64  `json:"total_tokens"`
 }
 
-// GetCurrentHourBreakdown 获取当前小时按 provider 拆分的实时统计数据（用于堆叠图）
-func (r *RequestLogRepository) GetCurrentHourBreakdown() ([]CurrentHourBreakdown, error) {
+// ModelDailyStat 模型级别每日统计数据
+type ModelDailyStat struct {
+	Date              string `json:"date"`
+	ProviderID        uint   `json:"provider_id"`
+	Model             string `json:"model"`
+	TotalInputTokens  int64  `json:"total_input_tokens"`
+	TotalOutputTokens int64  `json:"total_output_tokens"`
+	TotalTokens       int64  `json:"total_tokens"`
+	TotalCachedTokens int64  `json:"total_cached_tokens"`
+	RequestCount      int64  `json:"request_count"`
+}
+
+// GetHourlyModelStats 获取指定日期指定模型的分时统计（直接从 request_logs 查询）
+func (r *RequestLogRepository) GetHourlyModelStats(date time.Time, providerID uint, modelName string) ([]model.HourlyStatsResult, error) {
+	dayStart := date.Truncate(24 * time.Hour)
+	dayEnd := dayStart.Add(24 * time.Hour)
+
+	var hourExpr string
+	if r.dbType == "sqlite" {
+		hourExpr = "CAST(strftime('%H', created_at) AS INTEGER)"
+	} else {
+		hourExpr = "EXTRACT(HOUR FROM created_at)"
+	}
+
+	var results []model.HourlyStatsResult
+	err := r.db.Raw(fmt.Sprintf(`SELECT
+		%s as hour,
+		COUNT(*) as request_count,
+		COALESCE(SUM(total_tokens), 0) as total_tokens,
+		COALESCE(SUM(input_tokens), 0) as input_tokens,
+		COALESCE(SUM(output_tokens), 0) as output_tokens,
+		COALESCE(SUM(cached_tokens), 0) as cached_tokens
+	FROM request_logs
+	WHERE created_at >= ? AND created_at < ?
+		AND status = 'success'
+		AND provider_id = ?
+		AND model = ?
+	GROUP BY %s
+	ORDER BY hour
+	`, hourExpr, hourExpr), dayStart, dayEnd, providerID, modelName).Scan(&results).Error
+	return results, err
+}
+
+// GetCurrentHourModelStats 获取当前小时按 (provider, model) 拆分的模型级统计（用于混合查询）
+func (r *RequestLogRepository) GetCurrentHourModelStats(providerID uint) ([]ModelDailyStat, error) {
 	hourStart := time.Now().Truncate(time.Hour)
 
+	query := `SELECT
+		? as date,
+		provider_id,
+		COALESCE(NULLIF(model, ''), 'unknown') as model,
+		COALESCE(SUM(input_tokens), 0) as total_input_tokens,
+		COALESCE(SUM(output_tokens), 0) as total_output_tokens,
+		COALESCE(SUM(total_tokens), 0) as total_tokens,
+		COALESCE(SUM(cached_tokens), 0) as total_cached_tokens,
+		COUNT(*) as request_count
+	FROM request_logs
+	WHERE created_at >= ?
+		AND status = 'success'`
+
+	args := []interface{}{hourStart.Format("2006-01-02"), hourStart}
+	if providerID > 0 {
+		query += " AND provider_id = ?"
+		args = append(args, providerID)
+	}
+
+	query += " GROUP BY provider_id, model"
+
+	var results []ModelDailyStat
+	err := r.db.Raw(query, args...).Scan(&results).Error
+	if err != nil {
+		return nil, err
+	}
+	if results == nil {
+		return []ModelDailyStat{}, nil
+	}
+	return results, nil
+}
+
+// GetCurrentHourBreakdown 获取当前小时按 (provider, model) 拆分的实时统计数据（用于堆叠图）
+// providerID=0 时返回所有 provider 的数据，providerID>0 时只返回指定 provider 的数据
+func (r *RequestLogRepository) GetCurrentHourBreakdown(providerID uint) ([]CurrentHourBreakdown, error) {
+	hourStart := time.Now().Truncate(time.Hour)
+
+	query := r.db.Model(&model.RequestLog{}).
+		Select("provider_id, COALESCE(NULLIF(model, ''), 'unknown') as model, COALESCE(SUM(input_tokens), 0) as input_tokens, COALESCE(SUM(output_tokens), 0) as output_tokens, COALESCE(SUM(total_tokens), 0) as total_tokens").
+		Where("created_at >= ? AND status = 'success'", hourStart)
+	if providerID > 0 {
+		query = query.Where("provider_id = ?", providerID)
+	}
 	var results []CurrentHourBreakdown
-	err := r.db.Model(&model.RequestLog{}).
-		Select("provider_id, COALESCE(SUM(input_tokens), 0) as input_tokens, COALESCE(SUM(output_tokens), 0) as output_tokens, COALESCE(SUM(total_tokens), 0) as total_tokens").
-		Where("created_at >= ? AND status = 'success'", hourStart).
-		Group("provider_id").
+	err := query.Group("provider_id, model").
 		Scan(&results).Error
 	return results, err
 }

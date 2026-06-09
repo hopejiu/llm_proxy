@@ -15,6 +15,7 @@ export {
     CodeBuddyResultVO,
     HourlyStatBreakdownVO,
     LogEntryVO,
+    ModelStatVO,
     ProviderCreateVO,
     ProviderUpdateVO,
     ProviderVO,

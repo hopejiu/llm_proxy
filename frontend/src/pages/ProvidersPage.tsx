@@ -14,6 +14,9 @@ interface ModelEntry {
   name: string;
   aliases: string[];
   extra_params: string;
+  input_price: number;
+  output_price: number;
+  cache_price: number;
 }
 
 interface ProviderForm {
@@ -32,7 +35,7 @@ interface FormErrors {
   models?: string;
 }
 
-const emptyModel = (): ModelEntry => ({ name: "", aliases: [], extra_params: "" });
+const emptyModel = (): ModelEntry => ({ name: "", aliases: [], extra_params: "", input_price: 0, output_price: 0, cache_price: 0 });
 
 const emptyForm: ProviderForm = {
   name: "", base_url: "", api_key: "",
@@ -202,6 +205,39 @@ function ModelCard({
         />
       </div>
 
+      {/* Pricing row (always visible) */}
+      <div className="px-3 py-2 border-t border-[#F0EBF5]">
+        <label className="text-[11px] font-medium text-[#9C94B0] mb-1.5 block">
+          计费价格（元/百万 token，0=未设置）
+        </label>
+        <div className="grid grid-cols-3 gap-2">
+          {[
+            { key: "input_price" as const, label: "输入价" },
+            { key: "output_price" as const, label: "输出价" },
+            { key: "cache_price" as const, label: "缓存价" },
+          ].map(({ key, label }) => (
+            <div key={key}>
+              <span className="text-[10px] text-[#9C94B0] mb-0.5 block">{label}</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                defaultValue={entry[key] > 0 ? String(entry[key]) : ""}
+                onBlur={(e) => {
+                  const raw = e.target.value.trim();
+                  const num = raw === "" ? 0 : parseFloat(raw);
+                  update({ [key]: isNaN(num) ? 0 : num });
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                }}
+                className="input-field text-xs w-full"
+                placeholder="0.00"
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Extra params (collapsible) */}
       {!collapsed && (
         <div className="px-3 pb-3">
@@ -364,7 +400,7 @@ export default function ProvidersPage() {
     const toAdd: ModelEntry[] = [];
     fetchSelected.forEach((name) => {
       if (!existingNames.has(name)) {
-        toAdd.push({ name, aliases: [], extra_params: "" });
+        toAdd.push({ name, aliases: [], extra_params: "", input_price: 0, output_price: 0, cache_price: 0 });
       }
     });
     if (toAdd.length === 0) {

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { Events } from "@wailsio/runtime";
 import { StatsAPI } from "../services";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import Modal from "../components/Modal";
@@ -57,14 +58,16 @@ export default function RealtimePage() {
   const [requests, setRequests] = useState<ActiveRequest[]>([]);
   const [recentLogs, setRecentLogs] = useState<any[]>([]);
   const [settings, setSettings] = useLocalStorage("realtime_settings", { autoRefresh: true, interval: 2 });
-  const [activeDetail, setActiveDetail] = useState<ActiveRequest | null>(null);
+  const [activeDetailId, setActiveDetailId] = useState<string | null>(null);
   const [updateTime, setUpdateTime] = useState("");
   const autoRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const elapseTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const [, forceUpdate] = useState(0);
 
   const streamingCount = requests.filter((r) => r.status === "streaming").length;
+  const activeDetail = activeDetailId ? requests.find((r) => r.request_id === activeDetailId) || null : null;
 
+  // 初始全量拉取（页面打开时获取当前状态）
   const fetchData = useCallback(async () => {
     try {
       const [reqs, logs] = await Promise.all([
@@ -77,18 +80,65 @@ export default function RealtimePage() {
     } catch {}
   }, []);
 
+  // 耗时计数器（只刷新 elapsed 显示）
   useEffect(() => {
     elapseTimer.current = setInterval(() => forceUpdate((n) => n + 1), 1000);
     return () => { if (elapseTimer.current) clearInterval(elapseTimer.current); };
   }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  // Wails 事件监听：活跃请求实时推送
+  useEffect(() => {
+    fetchData();
 
+    // 先清理再注册，避免重复
+    Events.Off("active-request:add", "active-request:update", "active-request:remove");
+
+    Events.On("active-request:add", (event: any) => {
+      const change = event.data; // ActiveTrackerChange
+      const activeReq = change?.data; // ActiveRequest
+      if (!activeReq) return;
+      setRequests((prev) => {
+        if (prev.some((r) => r.request_id === activeReq.request_id)) return prev;
+        return [activeReq, ...prev];
+      });
+    });
+
+    Events.On("active-request:update", (event: any) => {
+      const change = event.data; // ActiveTrackerChange
+      const activeReq = change?.data; // ActiveRequest
+      if (!activeReq) return;
+      setRequests((prev) =>
+        prev.map((r) => (r.request_id === activeReq.request_id ? activeReq : r)),
+      );
+    });
+
+    Events.On("active-request:remove", (event: any) => {
+      const change = event.data; // ActiveTrackerChange
+      const requestId = change?.request_id;
+      if (!requestId) return;
+      setRequests((prev) => prev.filter((r) => r.request_id !== requestId));
+      setActiveDetailId((prev) => (prev === requestId ? null : prev));
+    });
+
+    return () => {
+      Events.Off("active-request:add", "active-request:update", "active-request:remove");
+    };
+  }, [fetchData]);
+
+  // 轮询：仅用于"最近完成的请求"（数据库持久化数据）
   useEffect(() => {
     if (autoRef.current) clearInterval(autoRef.current);
-    if (settings.autoRefresh) autoRef.current = setInterval(fetchData, settings.interval * 1000);
+    if (settings.autoRefresh) {
+      autoRef.current = setInterval(async () => {
+        try {
+          const logs = await StatsAPI.getRecentLogs(30);
+          setRecentLogs(logs || []);
+          setUpdateTime(new Date().toLocaleTimeString());
+        } catch {}
+      }, settings.interval * 1000);
+    }
     return () => { if (autoRef.current) clearInterval(autoRef.current); };
-  }, [settings.autoRefresh, settings.interval, fetchData]);
+  }, [settings.autoRefresh, settings.interval]);
 
   function toggleAutoRefresh() {
     setSettings({ ...settings, autoRefresh: !settings.autoRefresh });
@@ -98,11 +148,9 @@ export default function RealtimePage() {
     setSettings({ ...settings, interval: val });
   }
 
-  async function showActiveDetail(reqId: string) {
-    try { const req = await StatsAPI.getActiveRequest(reqId); setActiveDetail(req); } catch { setActiveDetail(null); }
+  function elapsedSince(t: string): string {
+    return ((Date.now() - new Date(t).getTime()) / 1000).toFixed(1);
   }
-
-  function elapsedSince(t: string): string { return ((Date.now() - new Date(t).getTime()) / 1000).toFixed(1); }
 
   function formatProtocol(protocol: string): string {
     const map: Record<string, string> = { openai: "OpenAI", anthropic: "Anthropic", ollama: "Ollama" };
@@ -117,7 +165,7 @@ export default function RealtimePage() {
   return (
     <div className="page-container">
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <StatCard label="活跃请求" badge="Active" mainValue={requests.length} mainUnit="个请求">
           <div className="mt-2 text-xs"><span className="text-[#9C94B0]">其中流式 </span><span className="font-semibold text-brand-600">{streamingCount} 个</span></div>
         </StatCard>
@@ -138,20 +186,7 @@ export default function RealtimePage() {
             正在进行的请求
           </h2>
           <div className="flex items-center gap-3">
-            <span className="text-xs text-[#9C94B0]">{updateTime ? `更新于 ${updateTime}` : "-"}</span>
-            <button onClick={fetchData} className="btn-ghost p-1.5" aria-label="刷新">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-            </button>
-            <div className="flex items-center gap-2 text-xs text-[#6B6580]">
-              <span>自动刷新</span>
-              <label className="toggle">
-                <input type="checkbox" checked={settings.autoRefresh} onChange={toggleAutoRefresh} className="sr-only peer" />
-                <div className="toggle-track peer-checked:bg-brand-600" />
-                <div className="toggle-thumb peer-checked:translate-x-4" />
-              </label>
-            </div>
+            <span className="text-xs text-[#9C94B0]">{updateTime ? `日志更新于 ${updateTime}` : "-"}</span>
           </div>
         </div>
 
@@ -172,7 +207,7 @@ export default function RealtimePage() {
               return (
                 <div
                   key={req.request_id}
-                  onClick={() => showActiveDetail(req.request_id)}
+                  onClick={() => setActiveDetailId(req.request_id)}
                   className="bg-white border border-[#EDE9FE] rounded-lg p-4 cursor-pointer hover:border-brand-300 transition-all duration-150"
                 >
                   <div className="flex items-center justify-between mb-2">
@@ -206,10 +241,6 @@ export default function RealtimePage() {
                       ))}
                     </div>
                   )}
-                  <div className="mt-3 h-1.5 bg-[#F0EBF5] rounded-full overflow-hidden">
-                    <div className={`h-full rounded-full transition-all duration-500 ${isStreaming ? "bg-brand-600 animate-pulse" : "bg-amber-400"}`}
-                      style={{ width: isStreaming ? "60%" : "30%" }} />
-                  </div>
                 </div>
               );
             })}
@@ -221,13 +252,23 @@ export default function RealtimePage() {
       <div className="section-card">
         <div className="card-header">
           <h2 className="card-title">最近完成的请求</h2>
-          <span className="text-xs text-[#9C94B0]">{updateTime ? `更新于 ${updateTime}` : "-"}</span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-[#9C94B0]">{updateTime ? `更新于 ${updateTime}` : "-"}</span>
+            <div className="flex items-center gap-2 text-xs text-[#6B6580]">
+              <span>自动刷新</span>
+              <label className="toggle">
+                <input type="checkbox" checked={settings.autoRefresh} onChange={toggleAutoRefresh} className="sr-only peer" />
+                <div className="toggle-track peer-checked:bg-brand-600" />
+                <div className="toggle-thumb peer-checked:translate-x-4" />
+              </label>
+            </div>
+          </div>
         </div>
         <RecentRequestsTable logs={recentLogs} showTps />
       </div>
 
       {/* Active Request Detail Modal */}
-      <Modal open={!!activeDetail} onClose={() => setActiveDetail(null)} title="活跃请求详情" className="max-w-3xl">
+      <Modal open={!!activeDetail} onClose={() => setActiveDetailId(null)} title="活跃请求详情" className="max-w-3xl">
         {activeDetail && (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">

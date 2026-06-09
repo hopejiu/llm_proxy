@@ -153,6 +153,11 @@ func main() {
 	// 保存窗口引用到绑定服务
 	appBindingService.SetMainWindow(mainWindow)
 
+	// 活跃请求变更 → Wails 事件推送（前端通过 Events.On 接收）
+	tracker.SetOnChange(func(change handler.ActiveTrackerChange) {
+		app.Event.Emit("active-request:"+change.Type, change)
+	})
+
 	// 系统托盘
 	tray := app.SystemTray.New()
 	tray.SetIcon(trayIcon)
@@ -275,6 +280,28 @@ func migrateDB(db *gorm.DB, cfg *config.Config) {
 			slog.Warn("删除外键约束失败，可能已不存在", "error", err)
 		} else {
 			slog.Info("已删除旧的外键约束 fk_request_logs_provider")
+		}
+	}
+
+	// 删除旧的 (hour, provider_id) 唯一索引，已被 (hour, provider_id, model) 替代
+	// 旧索引会导致 provider 合计行(model='') 与 model 明细行冲突
+	if !cfg.IsSQLite() {
+		var idxCount int64
+		db.Raw("SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'hourly_stats' AND INDEX_NAME = 'idx_hour_provider'").Scan(&idxCount)
+		if idxCount > 0 {
+			if err := db.Exec("ALTER TABLE hourly_stats DROP INDEX idx_hour_provider").Error; err != nil {
+				slog.Warn("删除旧索引 idx_hour_provider 失败", "error", err)
+			} else {
+				slog.Info("已删除旧的唯一索引 idx_hour_provider(hour, provider_id)，使用 idx_hour_provider_model(hour, provider_id, model) 替代")
+			}
+		}
+	} else {
+		// SQLite: 旧索引名称可能不同
+		if err := db.Exec("DROP INDEX IF EXISTS idx_hourly_stats_hour").Error; err != nil {
+			slog.Debug("删除旧 SQLite 索引失败", "error", err)
+		}
+		if err := db.Exec("DROP INDEX IF EXISTS idx_hour_provider").Error; err != nil {
+			slog.Debug("删除旧 SQLite 索引 idx_hour_provider 失败", "error", err)
 		}
 	}
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/wanglejiu/llm-proxy/internal/handler"
 	"github.com/wanglejiu/llm-proxy/internal/model"
+	"github.com/wanglejiu/llm-proxy/internal/repository"
 	"github.com/wanglejiu/llm-proxy/internal/service"
 	"log/slog"
 )
@@ -57,14 +58,6 @@ func (s *StatsService) GetDailyStats(providerID uint) ([]model.TokenStats, error
 
 // GetHourlyStatsByDate 获取分时统计
 func (s *StatsService) GetHourlyStatsByDate(date string, providerID uint) ([]model.HourlyStatsResult, error) {
-	if date == "" {
-		stats, err := s.statsSvc.GetTodayHourlyStats(providerID)
-		if err != nil {
-			return nil, NewAppError("INTERNAL", "获取分时统计失败")
-		}
-		return stats, nil
-	}
-
 	parsedDate, err := time.Parse("2006-01-02", date)
 	if err != nil {
 		return nil, NewAppError("BAD_REQUEST", "日期格式错误，应为 YYYY-MM-DD")
@@ -77,40 +70,84 @@ func (s *StatsService) GetHourlyStatsByDate(date string, providerID uint) ([]mod
 	return stats, nil
 }
 
-// GetHourlyStatsByDateWithBreakdown 获取按 provider 拆分的分时统计（用于堆叠图）
-func (s *StatsService) GetHourlyStatsByDateWithBreakdown(date string) ([]HourlyStatBreakdownVO, error) {
+// GetHourlyModelStats 获取指定日期指定模型的分时统计
+func (s *StatsService) GetHourlyModelStats(date string, providerID uint, modelName string) ([]model.HourlyStatsResult, error) {
 	if date == "" {
 		date = time.Now().Format("2006-01-02")
 	}
-
-	items, err := s.statsSvc.GetHourlyStatsByDateWithBreakdown(date)
+	parsedDate, err := time.Parse("2006-01-02", date)
 	if err != nil {
-		slog.Error("获取拆分统计失败", "error", err)
-		return nil, NewAppError("INTERNAL", "获取拆分统计失败")
+		return nil, NewAppError("BAD_REQUEST", "日期格式错误")
+	}
+	if modelName == "" {
+		return nil, NewAppError("BAD_REQUEST", "模型名不能为空")
+	}
+	stats, err := s.statsSvc.GetHourlyModelStats(parsedDate, providerID, modelName)
+	if err != nil {
+		slog.Error("获取模型分时统计失败", "error", err)
+		return nil, NewAppError("INTERNAL", "获取分时统计失败")
+	}
+	return stats, nil
+}
+
+// GetModelStats 获取模型级别统计（用于前端计算成本）
+func (s *StatsService) GetModelStats(providerID uint) ([]ModelStatVO, error) {
+	items, err := s.statsSvc.GetModelStats(providerID)
+	if err != nil {
+		slog.Error("获取模型统计失败", "error", err)
+		return nil, NewAppError("INTERNAL", "获取模型统计失败")
 	}
 
-	result := make([]HourlyStatBreakdownVO, len(items))
+	providerNames := s.buildProviderNames(items)
+	result := make([]ModelStatVO, len(items))
 	for i, item := range items {
-		result[i] = HourlyStatBreakdownVO{
-			Hour:         item.Hour,
-			ProviderID:   item.ProviderID,
-			ProviderName: item.ProviderName,
-			InputTokens:  item.InputTokens,
-			OutputTokens: item.OutputTokens,
-			TotalTokens:  item.TotalTokens,
+		name := providerNames[item.ProviderID]
+		if name == "" {
+			if item.ProviderID == model.DeletedProviderID {
+				name = "已删除"
+			} else {
+				name = "未知"
+			}
+		}
+		result[i] = ModelStatVO{
+			Date:              item.Date,
+			ProviderID:        item.ProviderID,
+			ProviderName:      name,
+			Model:             item.Model,
+			TotalInputTokens:  item.TotalInputTokens,
+			TotalOutputTokens: item.TotalOutputTokens,
+			TotalTokens:       item.TotalTokens,
+			TotalCachedTokens: item.TotalCachedTokens,
+			RequestCount:      item.RequestCount,
 		}
 	}
 	return result, nil
 }
 
+// GetHourlyStatsByDateWithBreakdown 获取按 provider+model 拆分的分时统计（用于堆叠图）
+// providerID=0 时返回所有 provider 的数据，providerID>0 时只返回指定 provider 的数据
+func (s *StatsService) GetHourlyStatsByDateWithBreakdown(date string, providerID uint) ([]HourlyStatBreakdownVO, error) {
+	if date == "" {
+		date = time.Now().Format("2006-01-02")
+	}
+
+	items, err := s.statsSvc.GetHourlyStatsByDateWithBreakdown(date, providerID)
+	if err != nil {
+		slog.Error("获取拆分统计失败", "error", err)
+		return nil, NewAppError("INTERNAL", "获取拆分统计失败")
+	}
+
+	return items, nil
+}
+
 // ========== Logs ==========
 
-// GetRecentLogs 获取最近请求日志
-func (s *StatsService) GetRecentLogs(limit int) ([]RequestLogVO, error) {
+// GetRecentLogs 获取最近请求日志，modelName 非空时按模型名过滤
+func (s *StatsService) GetRecentLogs(limit int, modelName string) ([]RequestLogVO, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	logs, err := s.logSvc.GetRecentLogs(limit)
+	logs, err := s.logSvc.GetRecentLogs(limit, modelName)
 	if err != nil {
 		slog.Error("获取最近日志失败", "limit", limit, "error", err)
 		return nil, NewAppError("INTERNAL", "获取日志列表失败")
@@ -170,9 +207,24 @@ func (s *StatsService) buildProviderNameMap(logs []model.RequestLog) map[uint]st
 			providerIDs[log.ProviderID] = true
 		}
 	}
+	return s.resolveProviderNames(providerIDs)
+}
 
+// buildProviderNames 从 ModelDailyStat 列表批量查询 Provider 名称
+func (s *StatsService) buildProviderNames(stats []repository.ModelDailyStat) map[uint]string {
+	providerIDs := make(map[uint]bool)
+	for _, stat := range stats {
+		if stat.ProviderID != model.DeletedProviderID {
+			providerIDs[stat.ProviderID] = true
+		}
+	}
+	return s.resolveProviderNames(providerIDs)
+}
+
+// resolveProviderNames 通用 ProviderID→Name 解析
+func (s *StatsService) resolveProviderNames(ids map[uint]bool) map[uint]string {
 	names := make(map[uint]string)
-	for id := range providerIDs {
+	for id := range ids {
 		if p, err := s.providerSvc.GetProvider(id); err == nil {
 			names[id] = p.Name
 		}

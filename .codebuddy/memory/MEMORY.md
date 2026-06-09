@@ -31,6 +31,12 @@
 - **WebHandler**: 12 个端点待拆分（当前未在 v3 使用）
 - **VO.go**: 按领域分组 Provider/Stats+Log/Common
 
+## Wails v3 Events 关键模式 (2026-06-09)
+- Go 端: `app.Event.Emit("name", data)` 推送事件
+- 前端: `Events.On("name", callback)` — 回调接收 `WailsEvent { name, data }` 对象
+- **陷阱**: `event.data` 是 Go 传入的原始数据，不是 WailsEvent 本身。如果 Go 传 `ActiveTrackerChange{RequestID, Data}`，前端取 `event.data.Data`（大写→小写 JSON tag）才是 `ActiveRequest`
+- **debounce 模式**: `ActiveRequestTracker` 对 "update" 类型事件按 requestID 做 200ms 限频，"add"/"remove" 立即通知
+
 ## 用户偏好
 - **语言**: 简体中文
 - **构建工具**: uv 代替 python
