@@ -38,6 +38,7 @@ type Config struct {
 
 	// 桌面应用配置
 	AutoStartProxy bool // 启动时是否自动启动代理服务
+	AutoStartApp   bool // 开机自启动
 }
 
 // ========== 可热更新字段的 Getter ==========
@@ -108,6 +109,7 @@ func (c *Config) HotUpdate() {
 	c.LogCleanupDays = getIntFromMap(envMap, "LOG_CLEANUP_DAYS", 3)
 	c.LogLevel = getFromMap(envMap, "LOG_LEVEL", "info")
 	c.AutoStartProxy = getBoolFromMap(envMap, "AUTO_START_PROXY", true)
+	c.AutoStartApp = getBoolFromMap(envMap, "AUTO_START_APP", false)
 }
 
 // loadEnvFileMap 从 .env 文件读取所有键值对
@@ -241,6 +243,7 @@ func migrateEnvFile() {
 			"DB_TYPE", "DB_PATH", "DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_NAME",
 			"PROXY_PORT", "STREAM_MAX_RETRIES",
 			"RETRY_DELAY_BASE", "PROVIDER_CACHE_TTL", "LOG_CLEANUP_DAYS", "LOG_LEVEL", "AUTO_START_PROXY",
+			"AUTO_START_APP",
 		}
 		
 		written := make(map[string]bool)
@@ -289,6 +292,7 @@ func Load() *Config {
 		LogLevel:               getEnv("LOG_LEVEL", "info"),
 
 		AutoStartProxy: getEnvBool("AUTO_START_PROXY", true),
+		AutoStartApp:   getEnvBool("AUTO_START_APP", false),
 	}
 
 	// SQLite 路径：如果是相对路径，改为基于应用数据目录
@@ -474,6 +478,7 @@ func GetEnvItems() []EnvItem {
 				{Value: "true", Label: "启用"},
 				{Value: "false", Label: "禁用"},
 			}},
+		{Key: "AUTO_START_APP", Label: "开机自启动", Value: getFromMap(envMap, "AUTO_START_APP", "false"), DefaultValue: "false", Type: "bool", Group: "系统设置", Description: "开机时自动启动 LLM Proxy 桌面程序"},
 	}
 	return items
 }
@@ -516,6 +521,7 @@ func SaveEnvItems(items map[string]string) error {
 		"DB_TYPE", "DB_PATH", "DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_NAME",
 		"PROXY_PORT", "STREAM_MAX_RETRIES",
 		"RETRY_DELAY_BASE", "PROVIDER_CACHE_TTL", "LOG_CLEANUP_DAYS", "LOG_LEVEL", "AUTO_START_PROXY",
+		"AUTO_START_APP",
 	}
 
 	// 构建 .env 文件内容

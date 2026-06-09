@@ -24,6 +24,9 @@ export const StatsAPI = {
   getActiveRequest: (reqId: string) => StatsService.GetActiveRequest(reqId),
   getRecentLogs: (limit = 20, modelName = "") => StatsService.GetRecentLogs(limit, modelName).then((r: any) => r || []),
   getLogDetail: (id: number) => StatsService.GetLogDetail(id),
+  // 会话
+  getSessions: () => StatsService.GetSessions().then((r: any) => r || []),
+  getSessionRequests: (sessionID: number) => StatsService.GetSessionRequests(sessionID).then((r: any) => r || []),
 };
 
 // App API
@@ -43,4 +46,7 @@ export const AppAPI = {
   // 数据库热切换（需要执行 wails generate bindings 或 wails build 后可用）
   testDBConnection: (params: any) => AppService.TestDBConnection(params),
   applyDBConfig: (params: any) => AppService.ApplyDBConfig(params),
+  // 开机自启动
+  getAutostartStatus: () => AppService.GetAutostartStatus(),
+  setAutostart: (enabled: boolean) => AppService.SetAutostart(enabled),
 };

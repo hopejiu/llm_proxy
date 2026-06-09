@@ -23,5 +23,6 @@ export {
     ProviderVO,
     ProxyStatusVO,
     RequestLogDetailVO,
-    RequestLogVO
+    RequestLogVO,
+    SessionVO
 } from "./models.js";

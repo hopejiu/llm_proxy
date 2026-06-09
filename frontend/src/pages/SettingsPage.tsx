@@ -37,6 +37,10 @@ export default function SettingsPage() {
   // 分卡片保存状态
   const [savingSections, setSavingSections] = useState<Record<string, boolean>>({});
 
+  // 开机自启动状态（从注册表实时读取）
+  const [autostartEnabled, setAutostartEnabled] = useState(false);
+  const [autostartLoading, setAutostartLoading] = useState(true);
+
   const loadConfig = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -59,6 +63,11 @@ export default function SettingsPage() {
   useEffect(() => {
     loadConfig();
     AppAPI.getVersion().then((v: any) => setVersionInfo(v)).catch(() => {});
+    // 加载开机自启动状态
+    AppAPI.getAutostartStatus().then((enabled: boolean) => {
+      setAutostartEnabled(enabled);
+      setAutostartLoading(false);
+    }).catch(() => setAutostartLoading(false));
   }, [loadConfig]);
 
   // ========== 代理服务控制 ==========
@@ -162,6 +171,23 @@ export default function SettingsPage() {
       toast("error", "应用失败");
     } finally {
       setDbApplying(false);
+    }
+  };
+
+  // ========== 分卡片保存 ==========
+
+  // ========== 开机自启动 ==========
+
+  const handleAutostartToggle = async () => {
+    const newVal = !autostartEnabled;
+    setError(null);
+    try {
+      await AppAPI.setAutostart(newVal);
+      setAutostartEnabled(newVal);
+      toast("success", newVal ? "开机自启动已开启" : "开机自启动已关闭");
+    } catch (e: any) {
+      setError("设置开机自启动失败: " + (e?.message || "未知错误"));
+      toast("error", "设置失败");
     }
   };
 
@@ -404,7 +430,7 @@ export default function SettingsPage() {
 
       {/* ===== 其他配置 ===== */}
       {!loading &&
-        groups.filter((g) => g !== "代理服务" && g !== "数据库").map((group) => {
+        groups.filter((g) => g !== "代理服务" && g !== "数据库" && g !== "系统设置").map((group) => {
           const items = envItems.filter(
             (i) =>
               i.group === group &&
@@ -444,6 +470,24 @@ export default function SettingsPage() {
 
       {/* 加载空状态 */}
       {loading && <LoadingSpinner text="加载配置中..." />}
+
+      {/* ===== 系统设置 ===== */}
+      <section className="section-card mb-4">
+        <h2 className="card-title mb-4">系统设置</h2>
+        <div>
+          <label className="form-label">开机自启动</label>
+          <label className="toggle flex items-center gap-3 cursor-pointer">
+            <input type="checkbox" checked={autostartEnabled}
+              onChange={handleAutostartToggle}
+              disabled={autostartLoading}
+              className="sr-only peer" />
+            <div className="toggle-track peer-checked:bg-brand-600" />
+            <div className="toggle-thumb peer-checked:translate-x-4" />
+            <span className="text-sm text-[#6B6580]">{autostartLoading ? "检测中..." : autostartEnabled ? "已启用" : "已禁用"}</span>
+          </label>
+          <p className="form-helper">开机时自动启动 LLM Proxy 桌面程序</p>
+        </div>
+      </section>
 
       {/* 版本信息 */}
       <section className="section-card">

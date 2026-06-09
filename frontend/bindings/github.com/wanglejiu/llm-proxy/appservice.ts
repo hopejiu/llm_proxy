@@ -36,6 +36,13 @@ export function EnvFileExists(): $CancellablePromise<boolean> {
 }
 
 /**
+ * GetAutostartStatus 获取当前是否已注册开机自启动（以注册表/OS 配置为准）
+ */
+export function GetAutostartStatus(): $CancellablePromise<boolean> {
+    return $Call.ByID(1609018541);
+}
+
+/**
  * GetDBFallbackMsg 获取数据库回退提示信息
  */
 export function GetDBFallbackMsg(): $CancellablePromise<string> {
@@ -127,6 +134,20 @@ export function LogWarn(msg: string): $CancellablePromise<void> {
  */
 export function SaveEnvConfig(items: { [_ in string]?: string }): $CancellablePromise<void> {
     return $Call.ByID(241746900, items);
+}
+
+/**
+ * SetApp 保存 Wails App 引用，用于 Autostart 等 API
+ */
+export function SetApp(app: application$0.App | null): $CancellablePromise<void> {
+    return $Call.ByID(3487267257, app);
+}
+
+/**
+ * SetAutostart 设置开机自启动（写入 .env + 更新操作系统注册）
+ */
+export function SetAutostart(enabled: boolean): $CancellablePromise<void> {
+    return $Call.ByID(1760948543, enabled);
 }
 
 /**

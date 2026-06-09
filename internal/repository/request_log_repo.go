@@ -22,6 +22,46 @@ func (r *RequestLogRepository) Create(log *model.RequestLog) error {
 	return r.dbManager.GetDB().Create(log).Error
 }
 
+// GetBySession 根据会话ID获取请求日志列表
+func (r *RequestLogRepository) GetBySession(sessionID uint) ([]model.RequestLog, error) {
+	var logs []model.RequestLog
+	err := r.dbManager.GetDB().Select("id, provider_id, model, input_tokens, output_tokens, total_tokens, cached_tokens, status, error_message, duration, created_at").
+		Where("session_id = ?", sessionID).
+		Order("created_at asc").
+		Find(&logs).Error
+	if err != nil {
+		return nil, err
+	}
+	r.fillProviderInfoBatch(logs)
+	return logs, nil
+}
+
+// UpdateSessionID 更新请求日志的会话ID（创建后补填）
+func (r *RequestLogRepository) UpdateSessionID(id uint, sessionID uint) error {
+	return r.dbManager.GetDB().Model(&model.RequestLog{}).
+		Where("id = ?", id).
+		Update("session_id", sessionID).Error
+}
+
+// GetCostRowsBySession 获取指定会话的请求成本明细
+func (r *RequestLogRepository) GetCostRowsBySession(sessionID uint) ([]CostRow, error) {
+	var rows []CostRow
+	err := r.dbManager.GetDB().Model(&model.RequestLog{}).
+		Select("provider_id, model, input_tokens, output_tokens, cached_tokens").
+		Where("session_id = ? AND status = 'success'", sessionID).
+		Scan(&rows).Error
+	return rows, err
+}
+
+// CostRow 成本计算行
+type CostRow struct {
+	ProviderID   uint
+	Model        string
+	InputTokens  int
+	OutputTokens int
+	CachedTokens int
+}
+
 // GetByID 根据ID获取日志（含完整大字段，用于查看详情）
 func (r *RequestLogRepository) GetByID(id uint) (*model.RequestLog, error) {
 	var requestLog model.RequestLog

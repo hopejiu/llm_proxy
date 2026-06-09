@@ -10,6 +10,7 @@ import (
 	"github.com/wanglejiu/llm-proxy/internal/service"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -49,6 +50,7 @@ func (h *AnthropicHandler) Messages(c *gin.Context) {
 // handleNonStreamMessages 处理非流式请求（协议转换）
 func (h *AnthropicHandler) handleNonStreamMessages(c *gin.Context, body []byte, startTime time.Time) {
 	requestID := requestIDFromContext(c.Request.Context())
+	sessionID := sessionIDFromContext(c.Request.Context())
 
 	var anthropicReq model.AnthropicMessagesRequest
 	json.Unmarshal(body, &anthropicReq)
@@ -113,7 +115,7 @@ func (h *AnthropicHandler) handleNonStreamMessages(c *gin.Context, body []byte, 
 		Status:          "success",
 		Duration:        time.Since(startTime).Milliseconds(),
 	}
-	h.SaveRequestLog(reqLog)
+	h.SaveRequestLog(reqLog, sessionID)
 	slog.Info("anthropic request", "requestID", requestID, "provider", provider.Name, "model", resolvedModel, "status", "SUCCESS", "duration_ms", time.Since(startTime).Milliseconds())
 
 	// 非流式请求完成后，将响应内容追加到 tracker
@@ -124,12 +126,20 @@ func (h *AnthropicHandler) handleNonStreamMessages(c *gin.Context, body []byte, 
 		h.tracker.AppendResponse(requestID, reqLog.ThinkingContent)
 	}
 
+	// 仅在新建会话时注入会话标记
+	if isNewSession(c.Request.Context()) && sessionID > 0 {
+		anthropicJSON, _ := json.Marshal(anthropicResp)
+		modifiedJSON := InjectSessionMarkIntoResponse(anthropicJSON, sessionID, "anthropic")
+		json.Unmarshal(modifiedJSON, &anthropicResp)
+	}
+
 	c.JSON(http.StatusOK, anthropicResp)
 }
 
 // handleStreamMessages 处理流式请求（OpenAI 类型 Provider，需要协议转换）
 func (h *AnthropicHandler) handleStreamMessages(c *gin.Context, body []byte, startTime time.Time) {
 	requestID := requestIDFromContext(c.Request.Context())
+	sessionID := sessionIDFromContext(c.Request.Context())
 
 	var anthropicReq model.AnthropicMessagesRequest
 	json.Unmarshal(body, &anthropicReq)
@@ -155,12 +165,23 @@ func (h *AnthropicHandler) handleStreamMessages(c *gin.Context, body []byte, sta
 
 	state := newAnthropicStreamState(h, c, provider, requestID, resolvedModel)
 
+	var anthropicSessionInjected bool // 防重复注入
 	responseBuilder, tokens, lastErr := h.ExecuteStreamWithRetry(
 		c.Request.Context(),
 		provider,
 		openAIBody,
 		h.DefaultStreamRetryConfig(),
 		func(line string, currentTokens *StreamTokens) bool {
+			// 在 [DONE] 前注入独立会话标记行（不要改 finish_reason chunk）
+			if !anthropicSessionInjected && isNewSession(c.Request.Context()) && sessionID > 0 &&
+				strings.HasPrefix(line, "data: ") && strings.TrimPrefix(line, "data: ") == "[DONE]" {
+				suffix := fmt.Sprintf("%s%d%s", sessionMarkPrefix, sessionID, sessionMarkSuffix)
+				markChunk := fmt.Sprintf(`{"id":"%s","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"%s"}}]}`,
+					requestID, suffix)
+				SafeWriteSSE(c, "data: "+markChunk+"\n\n")
+				anthropicSessionInjected = true
+				slog.Info("[session] ===> Anthropic流式注入 #1（独立行）", "sessionID", sessionID)
+			}
 			return state.processLine(line, currentTokens)
 		},
 	)
@@ -180,12 +201,17 @@ func (h *AnthropicHandler) handleStreamMessages(c *gin.Context, body []byte, sta
 	// 如果流结束时没有收到 finish_reason，补发结束事件
 	state.finalize(&tokens)
 
+	anthropicContent := state.fullContent.String()
+	if anthropicSessionInjected {
+		anthropicContent += fmt.Sprintf("%s%d%s", sessionMarkPrefix, sessionID, sessionMarkSuffix)
+	}
+
 	reqLog := &model.RequestLog{
 		ProviderID:      provider.ID,
 		Model:           resolvedModel,
 		RequestBody:     string(openAIBody),
 		ResponseBody:    responseBuilder.String(),
-		ResponseContent: state.fullContent.String(),
+		ResponseContent: anthropicContent,
 		ThinkingContent: state.thinkingContent.String(),
 		InputTokens:     tokens.InputTokens,
 		OutputTokens:    tokens.OutputTokens,
@@ -195,7 +221,7 @@ func (h *AnthropicHandler) handleStreamMessages(c *gin.Context, body []byte, sta
 		Duration:        time.Since(startTime).Milliseconds(),
 	}
 
-	h.SaveRequestLog(reqLog)
+	h.SaveRequestLog(reqLog, sessionID)
 
 	slog.Info("anthropic request", "requestID", requestID, "provider", provider.Name, "model", resolvedModel, "status", "STREAM_END", "duration_ms", time.Since(startTime).Milliseconds())
 }

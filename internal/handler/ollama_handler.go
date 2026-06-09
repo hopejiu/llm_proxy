@@ -50,6 +50,7 @@ func (h *OllamaHandler) Chat(c *gin.Context) {
 // handleNonStreamChat 处理非流式聊天请求
 func (h *OllamaHandler) handleNonStreamChat(c *gin.Context, body []byte, startTime time.Time) {
 	requestID := requestIDFromContext(c.Request.Context())
+	sessionID := sessionIDFromContext(c.Request.Context())
 
 	var ollamaReq model.OllamaChatRequest
 	json.Unmarshal(body, &ollamaReq)
@@ -116,12 +117,19 @@ func (h *OllamaHandler) handleNonStreamChat(c *gin.Context, body []byte, startTi
 		Status:          "success",
 		Duration:        time.Since(startTime).Milliseconds(),
 	}
-	h.SaveRequestLog(reqLog)
+	h.SaveRequestLog(reqLog, sessionID)
 	slog.Info("ollama request", "requestID", requestID, "provider", provider.Name, "model", resolvedModel, "status", "SUCCESS", "duration_ms", time.Since(startTime).Milliseconds())
 
 	// 非流式请求完成后，将响应内容追加到 tracker
 	if reqLog.ResponseContent != "" {
 		h.tracker.AppendResponse(requestID, reqLog.ResponseContent)
+	}
+
+	// 仅在新建会话时注入会话标记
+	if isNewSession(c.Request.Context()) && sessionID > 0 {
+		ollamaJSON, _ := json.Marshal(ollamaResp)
+		modifiedJSON := InjectSessionMarkIntoResponse(ollamaJSON, sessionID, "ollama")
+		json.Unmarshal(modifiedJSON, &ollamaResp)
 	}
 
 	c.JSON(http.StatusOK, ollamaResp)
@@ -130,6 +138,7 @@ func (h *OllamaHandler) handleNonStreamChat(c *gin.Context, body []byte, startTi
 // handleStreamChat 处理流式聊天请求（支持超时重试）
 func (h *OllamaHandler) handleStreamChat(c *gin.Context, body []byte, startTime time.Time) {
 	requestID := requestIDFromContext(c.Request.Context())
+	sessionID := sessionIDFromContext(c.Request.Context())
 
 	var ollamaReq model.OllamaChatRequest
 	json.Unmarshal(body, &ollamaReq)
@@ -157,6 +166,7 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, body []byte, startTime 
 	var fullContent strings.Builder
 	tracker := h.tracker
 
+	var ollamaSessionInjected bool // 防重复注入
 	// 使用 base_handler 的 ExecuteStreamWithRetry
 	responseBuilder, tokens, lastErr := h.ExecuteStreamWithRetry(
 		c.Request.Context(),
@@ -167,6 +177,16 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, body []byte, startTime 
 			if strings.HasPrefix(line, "data: ") {
 				data := strings.TrimPrefix(line, "data: ")
 				if data == "[DONE]" {
+					// 在 [DONE] 之前写入独立会话标记
+					if !ollamaSessionInjected && isNewSession(c.Request.Context()) && sessionID > 0 {
+						suffix := fmt.Sprintf("%s%d%s", sessionMarkPrefix, sessionID, sessionMarkSuffix)
+						markChunk := fmt.Sprintf(`{"id":"%s","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"%s"}}]}`,
+							requestID, suffix)
+						c.Writer.Write([]byte("data: " + markChunk + "\n\n"))
+						c.Writer.Flush()
+						ollamaSessionInjected = true
+						slog.Info("[session] ===> Ollama流式注入 #1（独立行）", "sessionID", sessionID)
+					}
 					return true // 收到 [DONE]，停止处理
 				}
 
@@ -209,10 +229,18 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, body []byte, startTime 
 		return
 	}
 
+	// 在 finalResp 的 message.content 中注入会话标记
+	// 仅当流式 processor 中尚未注入时才在 finalResp 注入，防重复
+	suffix := ""
+	if !ollamaSessionInjected && isNewSession(c.Request.Context()) && sessionID > 0 {
+		suffix = fmt.Sprintf("%s%d%s", sessionMarkPrefix, sessionID, sessionMarkSuffix)
+		slog.Info("[session] ===> Ollama finalResp注入", "sessionID", sessionID)
+	}
+
 	finalResp := model.OllamaChatResponse{
 		Model:           resolvedModel,
 		CreatedAt:       time.Now().Format(time.RFC3339),
-		Message:         model.OllamaMessage{Role: "assistant", Content: ""},
+		Message:         model.OllamaMessage{Role: "assistant", Content: suffix},
 		Done:            true,
 		DoneReason:      "stop",
 		TotalDuration:   time.Since(startTime).Nanoseconds(),
@@ -222,12 +250,17 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, body []byte, startTime 
 	finalBytes, _ := json.Marshal(finalResp)
 	SafeWriteSSE(c, string(finalBytes)+"\n")
 
+	ollamaFullContent := fullContent.String()
+	if ollamaSessionInjected {
+		ollamaFullContent += fmt.Sprintf("%s%d%s", sessionMarkPrefix, sessionID, sessionMarkSuffix)
+	}
+
 	reqLog := &model.RequestLog{
 		ProviderID:      provider.ID,
 		Model:           resolvedModel,
 		RequestBody:     string(openAIBody),
 		ResponseBody:    responseBuilder.String(),
-		ResponseContent: fullContent.String(),
+		ResponseContent: ollamaFullContent,
 		InputTokens:     tokens.InputTokens,
 		OutputTokens:    tokens.OutputTokens,
 		TotalTokens:     tokens.InputTokens + tokens.OutputTokens,
@@ -235,7 +268,7 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, body []byte, startTime 
 		Duration:        time.Since(startTime).Milliseconds(),
 	}
 
-	h.SaveRequestLog(reqLog)
+	h.SaveRequestLog(reqLog, sessionID)
 
 	slog.Info("ollama request", "requestID", requestID, "provider", provider.Name, "model", resolvedModel, "status", "STREAM_END", "duration_ms", time.Since(startTime).Milliseconds())
 }

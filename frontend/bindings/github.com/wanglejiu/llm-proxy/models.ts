@@ -529,3 +529,48 @@ export class RequestLogVO {
         return new RequestLogVO($$parsedSource as Partial<RequestLogVO>);
     }
 }
+
+export class SessionVO {
+    "id": number;
+    "models": string;
+    "request_count": number;
+    "total_tokens": number;
+    "total_cost": number;
+    "created_at": string;
+    "updated_at": string;
+
+    /** Creates a new SessionVO instance. */
+    constructor($$source: Partial<SessionVO> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = 0;
+        }
+        if (!("models" in $$source)) {
+            this["models"] = "";
+        }
+        if (!("request_count" in $$source)) {
+            this["request_count"] = 0;
+        }
+        if (!("total_tokens" in $$source)) {
+            this["total_tokens"] = 0;
+        }
+        if (!("total_cost" in $$source)) {
+            this["total_cost"] = 0;
+        }
+        if (!("created_at" in $$source)) {
+            this["created_at"] = "";
+        }
+        if (!("updated_at" in $$source)) {
+            this["updated_at"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SessionVO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): SessionVO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new SessionVO($$parsedSource as Partial<SessionVO>);
+    }
+}

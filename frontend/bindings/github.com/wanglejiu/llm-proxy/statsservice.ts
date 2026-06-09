@@ -16,6 +16,9 @@ import * as handler$0 from "./internal/handler/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
 import * as model$0 from "./internal/model/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as repository$0 from "./internal/repository/models.js";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -104,12 +107,37 @@ export function GetRecentLogs(limit: number, modelName: string): $CancellablePro
 }
 
 /**
+ * GetSessionRequests 获取指定会话的请求列表
+ */
+export function GetSessionRequests(sessionID: number): $CancellablePromise<$models.RequestLogVO[]> {
+    return $Call.ByID(1969007868, sessionID).then(($result: any) => {
+        return $$createType12($result);
+    });
+}
+
+/**
+ * GetSessions 获取所有会话列表（按创建时间倒序）
+ */
+export function GetSessions(): $CancellablePromise<$models.SessionVO[]> {
+    return $Call.ByID(1294167451).then(($result: any) => {
+        return $$createType14($result);
+    });
+}
+
+/**
  * GetStats 获取仪表盘统计
  */
 export function GetStats(providerID: number): $CancellablePromise<{ [_ in string]?: model$0.TokenStats | null }> {
     return $Call.ByID(802081133, providerID).then(($result: any) => {
-        return $$createType14($result);
+        return $$createType16($result);
     });
+}
+
+/**
+ * WithSessionRepo 设置会话仓库（启用会话统计查询）
+ */
+export function WithSessionRepo(repo: repository$0.ChatSessionRepository | null): $CancellablePromise<void> {
+    return $Call.ByID(2027830862, repo);
 }
 
 // Private type creation functions
@@ -126,5 +154,7 @@ const $$createType9 = $models.ModelStatVO.createFrom;
 const $$createType10 = $Create.Array($$createType9);
 const $$createType11 = $models.RequestLogVO.createFrom;
 const $$createType12 = $Create.Array($$createType11);
-const $$createType13 = $Create.Nullable($$createType2);
-const $$createType14 = $Create.Map($Create.Any, $$createType13);
+const $$createType13 = $models.SessionVO.createFrom;
+const $$createType14 = $Create.Array($$createType13);
+const $$createType15 = $Create.Nullable($$createType2);
+const $$createType16 = $Create.Map($Create.Any, $$createType15);

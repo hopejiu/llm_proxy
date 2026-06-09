@@ -3,6 +3,7 @@ version: '3'
 vars:
   APP_NAME: "llm-proxy"
   BIN_DIR: "bin"
+  APP_VERSION: "0.0.1"
   PACKAGE_MANAGER: '{{.PACKAGE_MANAGER | default "npm"}}'
   VITE_PORT: '{{.WAILS_VITE_PORT | default 9245}}'
 

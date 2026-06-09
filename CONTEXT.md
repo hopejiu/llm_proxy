@@ -44,6 +44,18 @@ _避免_: 直接传递 `*gorm.DB`，DB helper，连接池
 在应用数据库配置变更前，临时创建一个数据库连接并执行 Ping 操作，验证参数可用性（数据库是否存在、能否连通）。测试通过后才允许「应用配置」。
 _避免_: 直接应用不验证
 
+**会话 (Session)**:
+一组连续的、属于同一轮对话的代理请求。会话通过递增的数字 ID 标识，在 assistant 响应的 content 末尾以 `[SESSION]ID[/SESSION]` 文本后缀传递，第三方在后续请求中通过 messages 数组回传。
+_避免_: 对话, conversation, thread, 聊天记录
+
+**会话标记 (Session Mark)**:
+嵌入在 assistant 消息 content 末尾的文本标记，格式为 `[SESSION]数字ID[/SESSION]`。第三方的后续请求通过第一条 assistant 消息中的此标记识别会话归属。网关转发前会从 content 中移除该标记，避免污染上游 API。
+_避免_: session tag, session token, 会话标识
+
+**会话统计 (Session Stats)**:
+按会话聚合的指标，包含请求次数、token 用量和成本。通过独立表 `chat_sessions` 持久化，每次请求结束后按 session_id 重新聚合 `request_logs` 计算。
+_避免_: 会话分析, session analytics
+
 ## 示例对话
 
 **开发者**: "用户添加了一个新的 Provider，绑定服务应该调用业务服务创建记录，然后刷新前端表格。"

@@ -133,6 +133,18 @@ func requestLogToDetailVO(log *model.RequestLog) RequestLogDetailVO {
 	}
 }
 
+// ========== Session VO ==========
+
+type SessionVO struct {
+	ID           uint    `json:"id"`
+	Models       string  `json:"models"`
+	RequestCount int64   `json:"request_count"`
+	TotalTokens  int64   `json:"total_tokens"`
+	TotalCost    float64 `json:"total_cost"`
+	CreatedAt    string  `json:"created_at"`
+	UpdatedAt    string  `json:"updated_at"`
+}
+
 // ========== Common VO ==========
 
 type LogEntryVO struct {

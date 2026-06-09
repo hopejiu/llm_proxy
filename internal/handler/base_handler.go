@@ -60,6 +60,19 @@ func (h *BaseHandler) HandleProxyRequest(
 		return
 	}
 
+	// 会话ID 解析：提取标记 → 清洗 body → 存入 context
+	var sessionID uint
+	if h.sessionMgr != nil {
+		sid, cleanBody, newSess := h.sessionMgr.ResolveSession(body)
+		slog.Info("[session] ResolveSession", "sid", sid, "isNew", newSess, "bodyHasSession", strings.Contains(string(body), "[SESSION]"))
+		if sid > 0 {
+			sessionID = sid
+			body = cleanBody
+			c.Request = c.Request.WithContext(contextWithSessionID(ctx, sid))
+			c.Request = c.Request.WithContext(contextWithSessionNew(c.Request.Context(), newSess))
+		}
+	}
+
 	reqInfo, err := parseRequest(body)
 	if err != nil {
 		slog.Error(protocol+" request", "requestID", requestID, "status", "ERROR", "error", err.Error())
@@ -92,10 +105,22 @@ func (h *BaseHandler) HandleProxyRequest(
 	tracker.Add(activeReq)
 	defer tracker.Remove(requestID)
 
+	slog.Info("[session] HandleProxyRequest 模式",
+		"protocol", protocol,
+		"stream", reqInfo.Stream,
+		"sessionID", sessionID,
+		"isNew", isNewSession(c.Request.Context()),
+		"model", reqInfo.Model)
+
 	if reqInfo.Stream {
 		handleStream(c, body, startTime)
 	} else {
 		handleNormal(c, body, startTime)
+	}
+
+	// 请求结束后更新会话统计
+	if h.sessionMgr != nil && sessionID > 0 {
+		h.sessionMgr.RecalcSessionStats(sessionID)
 	}
 }
 
@@ -116,6 +141,7 @@ type BaseHandler struct {
 	httpClient     *http.Client
 	cfg            *config.Config
 	tracker        *ActiveRequestTracker
+	sessionMgr     *SessionManager // 会话管理器（nil 表示未启用会话追踪）
 }
 
 // NewBaseHandler 创建 BaseHandler 实例
@@ -136,6 +162,11 @@ func NewBaseHandler(proxyService *service.ProxyService, requestLogRepo *reposito
 		cfg:     cfg,
 		tracker: tracker,
 	}
+}
+
+// WithSessionManager 设置会话管理器（启用会话追踪）
+func (h *BaseHandler) WithSessionManager(sm *SessionManager) {
+	h.sessionMgr = sm
 }
 
 // generateRequestID 生成请求 ID
@@ -382,7 +413,10 @@ func truncateBody(body string) string {
 }
 
 // SaveRequestLog 保存请求日志（清理无效 UTF-8，截断过长的请求体/响应体）
-func (h *BaseHandler) SaveRequestLog(reqLog *model.RequestLog) {
+func (h *BaseHandler) SaveRequestLog(reqLog *model.RequestLog, sessionID ...uint) {
+	if len(sessionID) > 0 && sessionID[0] > 0 {
+		reqLog.SessionID = &sessionID[0]
+	}
 	reqLog.RequestBody = sanitizeBody(truncateBody(reqLog.RequestBody))
 	reqLog.ResponseBody = sanitizeBody(truncateBody(reqLog.ResponseBody))
 	reqLog.ResponseContent = sanitizeBody(reqLog.ResponseContent)

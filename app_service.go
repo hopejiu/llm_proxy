@@ -34,6 +34,7 @@ type AppService struct {
 	logReader        *logger.LogReader
 	dbFallbackMsg    string
 	mainWindow       *application.WebviewWindow
+	app              *application.App
 
 	proxyState proxyState
 	ctx        context.Context
@@ -312,6 +313,45 @@ func (s *AppService) HideMainWindow() {
 	if s.mainWindow != nil {
 		s.mainWindow.Hide()
 	}
+}
+
+// SetApp 保存 Wails App 引用，用于 Autostart 等 API
+func (s *AppService) SetApp(app *application.App) {
+	s.app = app
+}
+
+// GetAutostartStatus 获取当前是否已注册开机自启动（以注册表/OS 配置为准）
+func (s *AppService) GetAutostartStatus() bool {
+	if s.app == nil {
+		return false
+	}
+	enabled, err := s.app.Autostart.IsEnabled()
+	if err != nil {
+		slog.Warn("[GetAutostartStatus] 查询开机自启动状态失败", "error", err)
+		return false
+	}
+	return enabled
+}
+
+// SetAutostart 设置开机自启动（写入 .env + 更新操作系统注册）
+func (s *AppService) SetAutostart(enabled bool) error {
+	slog.Info("[SetAutostart] 设置开机自启动", "enabled", enabled)
+
+	// 1. 写入 .env 文件持久化
+	if err := config.SaveEnvItems(map[string]string{"AUTO_START_APP": fmt.Sprintf("%t", enabled)}); err != nil {
+		slog.Error("[SetAutostart] 写入 .env 失败", "error", err)
+		return err
+	}
+
+	// 2. 通过 Wails API 更新操作系统开机启动注册
+	if s.app == nil {
+		slog.Warn("[SetAutostart] app 引用为 nil，跳过注册表更新")
+		return nil
+	}
+	if enabled {
+		return s.app.Autostart.Enable()
+	}
+	return s.app.Autostart.Disable()
 }
 
 // ========== 前端日志 ==========

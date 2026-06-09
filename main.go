@@ -80,6 +80,7 @@ func main() {
 	providerRepo := repository.NewProviderRepository(dbManager)
 	requestLogRepo := repository.NewRequestLogRepository(dbManager)
 	hourlyStatRepo := repository.NewHourlyStatRepository(dbManager)
+	sessionRepo := repository.NewChatSessionRepository(dbManager)
 
 	// 启动时清理旧数据
 	cleanOldData(requestLogRepo, cfg.LogCleanupDays, dataDir)
@@ -90,6 +91,9 @@ func main() {
 	statsSvc := service.NewStatsService(hourlyStatRepo, requestLogRepo, providerSvc)
 	cleanupSvc := service.NewCleanupService(hourlyStatRepo, requestLogRepo, cfg)
 
+	// 创建会话管理器
+	sessionMgr := handler.NewSessionManager(sessionRepo)
+
 	// 启动时回填历史汇总数据
 	if err := cleanupSvc.BackfillMissingHours(); err != nil {
 		slog.Warn("回填历史汇总数据失败", "error", err)
@@ -98,8 +102,11 @@ func main() {
 	tracker := handler.NewActiveRequestTracker()
 
 	proxyHandler := handler.NewProxyHandler(proxyService, requestLogRepo, cfg, tracker)
+	proxyHandler.WithSessionManager(sessionMgr)
 	anthropicHandler := handler.NewAnthropicHandler(proxyService, requestLogRepo, cfg, tracker)
+	anthropicHandler.WithSessionManager(sessionMgr)
 	ollamaHandler := handler.NewOllamaHandler(proxyService, requestLogRepo, cfg, tracker)
+	ollamaHandler.WithSessionManager(sessionMgr)
 
 	// 创建日志读取器
 	logReader := logger.NewLogReader(logFilePath)
@@ -107,6 +114,7 @@ func main() {
 	// 创建 Wails 3 绑定服务
 	providerBindingService := NewProviderService(providerSvc, cfg, proxyService)
 	statsBindingService := NewStatsService(statsSvc, logSvc, providerSvc, tracker)
+	statsBindingService.WithSessionRepo(sessionRepo)
 	appBindingService := NewAppService(cfg, dbManager, proxyHandler, anthropicHandler, ollamaHandler, logReader, dbFallbackMsg)
 	cleanupWrapper := NewCleanupServiceWrapper(cleanupSvc)
 
@@ -136,6 +144,9 @@ func main() {
 			},
 		},
 	})
+
+	// 注入 App 引用到绑定服务
+	appBindingService.SetApp(app)
 
 	// 创建窗口
 	mainWindow := app.Window.NewWithOptions(application.WebviewWindowOptions{
@@ -265,12 +276,12 @@ func migrateDB(db *gorm.DB, cfg *config.Config) {
 		createSQLiteTablesIfNotExist(db)
 	}
 
-	if err := db.AutoMigrate(&model.ProviderConfig{}, &model.RequestLog{}, &model.HourlyStat{}); err != nil {
+	if err := db.AutoMigrate(&model.ProviderConfig{}, &model.RequestLog{}, &model.HourlyStat{}, &model.ChatSession{}); err != nil {
 		fatalMessageBox("启动失败", "数据库初始化失败: "+err.Error())
 	}
 
 	if !cfg.IsSQLite() {
-		tables := []string{"provider_configs", "request_logs", "hourly_stats"}
+		tables := []string{"provider_configs", "request_logs", "hourly_stats", "chat_sessions"}
 		for _, table := range tables {
 			sql := fmt.Sprintf("ALTER TABLE %s CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci", table)
 			if err := db.Exec(sql).Error; err != nil {
@@ -361,6 +372,15 @@ func createSQLiteTablesIfNotExist(db *gorm.DB) {
 			created_at DATETIME,
 			updated_at DATETIME
 		)`,
+		`CREATE TABLE IF NOT EXISTS chat_sessions (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			models TEXT DEFAULT '',
+			request_count INTEGER DEFAULT 0,
+			total_tokens INTEGER DEFAULT 0,
+			total_cost REAL DEFAULT 0,
+			created_at DATETIME,
+			updated_at DATETIME
+		)`,
 	}
 	for _, sql := range tables {
 		if err := db.Exec(sql).Error; err != nil {
@@ -375,6 +395,7 @@ func createIndexesIfNotExist(db *gorm.DB) {
 		"idx_created_at_status",
 		"idx_created_at",
 		"idx_provider_id",
+		"idx_session_id",
 	}
 	for _, name := range indexNames {
 		if migrator.HasIndex(&model.RequestLog{}, name) {

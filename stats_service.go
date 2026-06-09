@@ -19,6 +19,7 @@ type StatsService struct {
 	logSvc         *service.LogService
 	providerSvc    *service.ProviderService
 	tracker        *handler.ActiveRequestTracker
+	sessionRepo    *repository.ChatSessionRepository
 	ctx            context.Context
 }
 
@@ -29,6 +30,11 @@ func NewStatsService(statsSvc *service.StatsService, logSvc *service.LogService,
 		providerSvc: providerSvc,
 		tracker:     tracker,
 	}
+}
+
+// WithSessionRepo 设置会话仓库（启用会话统计查询）
+func (s *StatsService) WithSessionRepo(repo *repository.ChatSessionRepository) {
+	s.sessionRepo = repo
 }
 
 func (s *StatsService) ServiceStartup(ctx context.Context, _ application.ServiceOptions) error {
@@ -184,6 +190,56 @@ func (s *StatsService) GetLogDetail(id uint) (RequestLogDetailVO, error) {
 		}
 	}
 	return vo, nil
+}
+
+// ========== Sessions ==========
+
+// GetSessions 获取所有会话列表（按创建时间倒序）
+func (s *StatsService) GetSessions() ([]SessionVO, error) {
+	if s.sessionRepo == nil {
+		return nil, NewAppError("INTERNAL", "会话功能未启用")
+	}
+	sessions, err := s.sessionRepo.GetAll()
+	if err != nil {
+		slog.Error("获取会话列表失败", "error", err)
+		return nil, NewAppError("INTERNAL", "获取会话列表失败")
+	}
+
+	result := make([]SessionVO, len(sessions))
+	for i, sess := range sessions {
+		result[i] = SessionVO{
+			ID:           sess.ID,
+			Models:       sess.Models,
+			RequestCount: sess.RequestCount,
+			TotalTokens:  sess.TotalTokens,
+			TotalCost:    sess.TotalCost,
+			CreatedAt:    sess.CreatedAt.Format("2006-01-02 15:04:05"),
+			UpdatedAt:    sess.UpdatedAt.Format("2006-01-02 15:04:05"),
+		}
+	}
+	return result, nil
+}
+
+// GetSessionRequests 获取指定会话的请求列表
+func (s *StatsService) GetSessionRequests(sessionID uint) ([]RequestLogVO, error) {
+	if s.sessionRepo == nil {
+		return nil, NewAppError("INTERNAL", "会话功能未启用")
+	}
+	logs, err := s.logSvc.GetLogsBySession(sessionID)
+	if err != nil {
+		slog.Error("获取会话请求列表失败", "session_id", sessionID, "error", err)
+		return nil, NewAppError("INTERNAL", "获取请求列表失败")
+	}
+
+	providerNames := s.buildProviderNameMap(logs)
+
+	result := make([]RequestLogVO, len(logs))
+	for i, log := range logs {
+		vo := requestLogToVO(&log)
+		vo.ProviderName = providerNames[log.ProviderID]
+		result[i] = vo
+	}
+	return result, nil
 }
 
 // ========== Active Requests ==========

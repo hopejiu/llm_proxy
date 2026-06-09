@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Server, BarChart3, ScrollText, Activity, Settings, Power } from "lucide-react";
+import { Server, BarChart3, ScrollText, Activity, MessageSquare, Settings, Power } from "lucide-react";
 import { useAppContext } from "../context/AppContext";
 import { AppAPI } from "../services";
 import { useToast } from "../components/Toast";
@@ -9,6 +9,7 @@ import { useHotkey } from "../hooks/useHotkey";
 const navItems = [
   { to: "/providers", icon: Server, label: "Providers", hotkey: "1" },
   { to: "/stats", icon: BarChart3, label: "统计", hotkey: "2" },
+  { to: "/sessions", icon: MessageSquare, label: "会话", hotkey: "6" },
   { to: "/logs", icon: ScrollText, label: "日志", hotkey: "3" },
   { to: "/realtime", icon: Activity, label: "实时", hotkey: "4" },
   { to: "/settings", icon: Settings, label: "设置", hotkey: "5" },
@@ -50,6 +51,7 @@ export default function Layout() {
   useHotkey("Ctrl+3", useCallback(() => navigate("/logs"), [navigate]));
   useHotkey("Ctrl+4", useCallback(() => navigate("/realtime"), [navigate]));
   useHotkey("Ctrl+5", useCallback(() => navigate("/settings"), [navigate]));
+  useHotkey("Ctrl+6", useCallback(() => navigate("/sessions"), [navigate]));
   useHotkey("?", useCallback(() => setShowShortcuts((v) => !v), []));
 
   return (

@@ -7,6 +7,7 @@ import ProvidersPage from "./pages/ProvidersPage";
 import StatsPage from "./pages/StatsPage";
 import LogsPage from "./pages/LogsPage";
 import RealtimePage from "./pages/RealtimePage";
+import SessionsPage from "./pages/SessionsPage";
 import SettingsPage from "./pages/SettingsPage";
 
 export default function App() {
@@ -21,6 +22,7 @@ export default function App() {
               <Route path="stats" element={<ErrorBoundary><StatsPage /></ErrorBoundary>} />
               <Route path="logs" element={<ErrorBoundary><LogsPage /></ErrorBoundary>} />
               <Route path="realtime" element={<ErrorBoundary><RealtimePage /></ErrorBoundary>} />
+              <Route path="sessions" element={<ErrorBoundary><SessionsPage /></ErrorBoundary>} />
               <Route path="settings" element={<ErrorBoundary><SettingsPage /></ErrorBoundary>} />
             </Route>
           </Routes>

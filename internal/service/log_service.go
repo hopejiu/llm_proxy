@@ -22,3 +22,8 @@ func (s *LogService) GetRecentLogs(limit int, modelName string) ([]model.Request
 func (s *LogService) GetLogDetail(id uint) (*model.RequestLog, error) {
 	return s.requestLogRepo.GetByID(id)
 }
+
+// GetLogsBySession 根据会话ID获取请求日志列表
+func (s *LogService) GetLogsBySession(sessionID uint) ([]model.RequestLog, error) {
+	return s.requestLogRepo.GetBySession(sessionID)
+}

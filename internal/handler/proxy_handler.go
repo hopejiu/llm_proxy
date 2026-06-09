@@ -9,6 +9,7 @@ import (
 	"github.com/wanglejiu/llm-proxy/internal/model"
 	"github.com/wanglejiu/llm-proxy/internal/repository"
 	"github.com/wanglejiu/llm-proxy/internal/service"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -77,6 +78,7 @@ func (h *ProxyHandler) handleNormalRequest(c *gin.Context, body []byte, startTim
 func (h *ProxyHandler) handleNormalRequestOpenAI(c *gin.Context, body []byte, provider model.ProviderConfig, startTime time.Time) {
 	body = h.PrepareRequestBody(body, provider)
 	reqLog := h.CreateRequestLog(provider, string(body))
+	sessionID := sessionIDFromContext(c.Request.Context())
 
 	respBody, err := h.SendRequestWithRetry(c.Request.Context(), provider.GetRequestURL(), body, provider.APIKey, h.cfg.GetStreamMaxRetries())
 	if err != nil {
@@ -89,7 +91,7 @@ func (h *ProxyHandler) handleNormalRequestOpenAI(c *gin.Context, body []byte, pr
 			},
 		})
 		reqLog.ErrorMessage = err.Error()
-		h.SaveRequestLog(reqLog)
+		h.SaveRequestLog(reqLog, sessionID)
 		return
 	}
 
@@ -123,13 +125,24 @@ func (h *ProxyHandler) handleNormalRequestOpenAI(c *gin.Context, body []byte, pr
 	}
 
 	reqLog.Status = "success"
-	h.SaveRequestLog(reqLog)
+	h.SaveRequestLog(reqLog, sessionID)
 	h.LogRequest(c, body, startTime, "SUCCESS", "", provider)
 
 	// 非流式请求完成后，将响应内容追加到 tracker
 	requestID := requestIDFromContext(c.Request.Context())
 	if reqLog.ResponseContent != "" {
 		h.tracker.AppendResponse(requestID, reqLog.ResponseContent)
+	}
+
+	// 仅在新建会话时注入会话标记（后续请求已有标记，不重复注入）
+	slog.Info("[session] 注入前检查",
+		"sessionID", sessionID,
+		"isNew", isNewSession(c.Request.Context()),
+		"hasSession", strings.Contains(string(respBody), "[SESSION]"))
+	if isNewSession(c.Request.Context()) {
+		slog.Info("[session] ===> 非流式注入 #1", "sessionID", sessionID)
+		respBody = InjectSessionMarkIntoResponse(respBody, sessionID, "openai")
+		slog.Info("[session] ===> 非流式注入后响应", "body_truncated", string(respBody)[:min(len(string(respBody)), 300)])
 	}
 
 	c.Header("Content-Type", "application/json")
@@ -168,25 +181,41 @@ func (h *ProxyHandler) handleStreamRequestOpenAI(c *gin.Context, body []byte, pr
 	body = h.PrepareRequestBody(body, provider)
 	reqLog := h.CreateRequestLog(provider, string(body))
 	requestID := requestIDFromContext(c.Request.Context())
+	sessionID := sessionIDFromContext(c.Request.Context())
 	tracker := h.tracker
 
 	var receivedDone bool
+	var sessionInjected bool // 防重复注入：同一请求只注入一次标记
 	responseBuilder, tokens, lastErr := h.ExecuteStreamWithRetry(
 		c.Request.Context(),
 		provider,
 		body,
 		h.DefaultStreamRetryConfig(),
 		func(line string, _ *StreamTokens) bool {
-			c.Writer.Write([]byte(line + "\n\n"))
-			c.Writer.Flush()
-
-			// 实时提取流式内容追加到 tracker
 			if strings.HasPrefix(line, "data: ") {
 				data := strings.TrimPrefix(line, "data: ")
 				if data == "[DONE]" {
+					// 在 [DONE] 之前写入独立会话标记行（避免加到 finish_reason chunk 被客户端忽略）
+					if !sessionInjected && isNewSession(c.Request.Context()) && sessionID > 0 {
+						suffix := fmt.Sprintf("%s%d%s", sessionMarkPrefix, sessionID, sessionMarkSuffix)
+						markChunk := fmt.Sprintf(`{"id":"%s","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"%s"}}]}`,
+							requestID, suffix)
+						c.Writer.Write([]byte("data: " + markChunk + "\n\n"))
+						c.Writer.Flush()
+						sessionInjected = true
+						slog.Info("[session] ===> 流式注入 #1（独立行）", "sessionID", sessionID)
+					}
+
+					c.Writer.Write([]byte(line + "\n\n"))
+					c.Writer.Flush()
 					receivedDone = true
-					return true // 收到 [DONE]，停止处理
+					return true
 				}
+
+				// 普通 data 行：透写 + 提取 tracker 内容
+				c.Writer.Write([]byte(line + "\n\n"))
+				c.Writer.Flush()
+
 				var chunk map[string]interface{}
 				if json.Unmarshal([]byte(data), &chunk) == nil {
 					deltaResult := converter.ExtractDeltaFromChunk(chunk)
@@ -196,11 +225,14 @@ func (h *ProxyHandler) handleStreamRequestOpenAI(c *gin.Context, body []byte, pr
 					if deltaResult.ReasoningContent != "" {
 						tracker.AppendResponse(requestID, deltaResult.ReasoningContent)
 					}
-					// 追踪工具调用
 					if len(deltaResult.ToolCallsDelta) > 0 {
 						trackToolCallsFromDelta(deltaResult.ToolCallsDelta, requestID, tracker)
 					}
 				}
+			} else {
+				// 非 data 行（空行分隔符等）直接透写
+				c.Writer.Write([]byte(line + "\n\n"))
+				c.Writer.Flush()
 			}
 			return false
 		},
@@ -212,7 +244,7 @@ func (h *ProxyHandler) handleStreamRequestOpenAI(c *gin.Context, body []byte, pr
 		// 超时/错误时也必须发送 [DONE]，否则客户端会一直挂起等待
 		SafeWriteSSE(c, "data: [DONE]\n\n")
 		reqLog.ErrorMessage = lastErr.Error()
-		h.SaveRequestLog(reqLog)
+		h.SaveRequestLog(reqLog, sessionID)
 		return
 	}
 
@@ -223,6 +255,12 @@ func (h *ProxyHandler) handleStreamRequestOpenAI(c *gin.Context, body []byte, pr
 
 	reqLog.ResponseBody = responseBuilder.String()
 	reqLog.ResponseContent = parseStreamResponse(responseBuilder.String())
+	// 流式注入的标记在 processor 中已写入客户端，但 responseBuilder 捕获的是原始行
+	// 此处补回 sessionContent，使数据库记录与实际客户端接收一致
+	if sessionInjected {
+		suffix := fmt.Sprintf("%s%d%s", sessionMarkPrefix, sessionID, sessionMarkSuffix)
+		reqLog.ResponseContent += suffix
+	}
 	reqLog.InputTokens = tokens.InputTokens
 	reqLog.OutputTokens = tokens.OutputTokens
 	reqLog.TotalTokens = tokens.TotalTokens
@@ -230,7 +268,7 @@ func (h *ProxyHandler) handleStreamRequestOpenAI(c *gin.Context, body []byte, pr
 	reqLog.Duration = time.Since(startTime).Milliseconds()
 	reqLog.Status = "success"
 
-	h.SaveRequestLog(reqLog)
+	h.SaveRequestLog(reqLog, sessionID)
 
 	h.LogRequest(c, body, startTime, "STREAM_END", "", provider)
 }
