@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
-import { AppService } from "../../bindings/github.com/wanglejiu/llm-proxy";
+import { AppAPI } from "../services";
 import logger from "../lib/logger";
 
 export interface ProxyStatus {
@@ -24,7 +24,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const refreshProxyStatus = useCallback(() => {
-    AppService.GetProxyStatus()
+    AppAPI.getProxyStatus()
       .then((status: ProxyStatus) => {
         setProxyStatus(status);
       })

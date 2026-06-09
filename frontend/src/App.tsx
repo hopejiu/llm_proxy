@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AppProvider } from "./context/AppContext";
+import { ToastProvider } from "./components/Toast";
 import Layout from "./components/Layout";
 import ErrorBoundary from "./components/ErrorBoundary";
 import ProvidersPage from "./pages/ProvidersPage";
@@ -12,16 +13,18 @@ export default function App() {
   return (
     <BrowserRouter>
       <AppProvider>
-        <Routes>
-          <Route element={<Layout />}>
-            <Route index element={<Navigate to="/providers" replace />} />
-            <Route path="providers" element={<ErrorBoundary><ProvidersPage /></ErrorBoundary>} />
-            <Route path="stats" element={<ErrorBoundary><StatsPage /></ErrorBoundary>} />
-            <Route path="logs" element={<ErrorBoundary><LogsPage /></ErrorBoundary>} />
-            <Route path="realtime" element={<ErrorBoundary><RealtimePage /></ErrorBoundary>} />
-            <Route path="settings" element={<ErrorBoundary><SettingsPage /></ErrorBoundary>} />
-          </Route>
-        </Routes>
+        <ToastProvider>
+          <Routes>
+            <Route element={<Layout />}>
+              <Route index element={<Navigate to="/providers" replace />} />
+              <Route path="providers" element={<ErrorBoundary><ProvidersPage /></ErrorBoundary>} />
+              <Route path="stats" element={<ErrorBoundary><StatsPage /></ErrorBoundary>} />
+              <Route path="logs" element={<ErrorBoundary><LogsPage /></ErrorBoundary>} />
+              <Route path="realtime" element={<ErrorBoundary><RealtimePage /></ErrorBoundary>} />
+              <Route path="settings" element={<ErrorBoundary><SettingsPage /></ErrorBoundary>} />
+            </Route>
+          </Routes>
+        </ToastProvider>
       </AppProvider>
     </BrowserRouter>
   );

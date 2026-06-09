@@ -451,7 +451,11 @@ func GetEnvItems() []EnvItem {
 			Options: []EnvSelectOption{
 				{Value: "debug", Label: "Debug"}, {Value: "info", Label: "Info"}, {Value: "warn", Label: "Warn"}, {Value: "error", Label: "Error"},
 			}},
-		{Key: "AUTO_START_PROXY", Label: "自动启动代理", Value: getFromMap(envMap, "AUTO_START_PROXY", "true"), DefaultValue: "true", Type: "bool", Group: "其他", Description: "启动程序时是否自动启动代理服务", RestartRequired: true},
+		{Key: "AUTO_START_PROXY", Label: "自动启动代理", Value: getFromMap(envMap, "AUTO_START_PROXY", "true"), DefaultValue: "true", Type: "bool", Group: "其他", Description: "启动程序时是否自动启动代理服务", RestartRequired: true,
+			Options: []EnvSelectOption{
+				{Value: "true", Label: "启用"},
+				{Value: "false", Label: "禁用"},
+			}},
 	}
 	return items
 }

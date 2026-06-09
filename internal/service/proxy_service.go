@@ -79,7 +79,7 @@ func (s *ProxyService) GetAllProviders() ([]model.ProviderConfig, error) {
 	return s.getAllProvidersCached()
 }
 
-// GetProviderByModel 根据模型名匹配 Provider，优先别名匹配，其次模型名匹配
+// GetProviderByModel 根据模型名匹配 Provider，遍历所有 Provider 的 Models 配置
 func (s *ProxyService) GetProviderByModel(modelName string) (model.ProviderConfig, error) {
 	providers, err := s.getAllProvidersCached()
 	if err != nil {
@@ -90,22 +90,9 @@ func (s *ProxyService) GetProviderByModel(modelName string) (model.ProviderConfi
 		return model.ProviderConfig{}, fmt.Errorf("no provider available")
 	}
 
-	// 优先别名匹配
+	// 遍历所有 Provider，查找匹配的 ModelEntry
 	for i := range providers {
-		if providers[i].Model == "" {
-			continue
-		}
-		if providers[i].Alias == modelName {
-			return providers[i], nil
-		}
-	}
-
-	// 其次模型名匹配
-	for i := range providers {
-		if providers[i].Model == "" {
-			continue
-		}
-		if providers[i].Model == modelName {
+		if entry := providers[i].FindModelEntry(modelName); entry != nil {
 			return providers[i], nil
 		}
 	}
@@ -118,21 +105,29 @@ func (s *ProxyService) GetProviderByModel(modelName string) (model.ProviderConfi
 	return model.ProviderConfig{}, fmt.Errorf("no provider found for model: %s, available models: %s", modelName, strings.Join(available, ", "))
 }
 
-// PrepareRequestBody 准备请求体，替换model并合并ExtraParams
+// PrepareRequestBody 准备请求体，替换model为匹配的上游模型名，合并模型级ExtraParams
 func (s *ProxyService) PrepareRequestBody(reqBody []byte, provider model.ProviderConfig) []byte {
+	var reqInfo struct {
+		Model string `json:"model"`
+	}
+	json.Unmarshal(reqBody, &reqInfo)
+
 	var reqMap map[string]interface{}
 	if err := json.Unmarshal(reqBody, &reqMap); err == nil {
-		reqMap["model"] = provider.Model
+		// 查找匹配的 ModelEntry，使用上游模型名替换
+		if entry := provider.FindModelEntry(reqInfo.Model); entry != nil {
+			reqMap["model"] = entry.Name
 
-		// 合并ExtraParams
-		if provider.ExtraParams != "" {
-			var extraParams map[string]interface{}
-			if err := json.Unmarshal([]byte(provider.ExtraParams), &extraParams); err == nil {
-				for key, value := range extraParams {
-					reqMap[key] = value
+			// 合并模型级 ExtraParams
+			if entry.ExtraParams != "" {
+				var ep map[string]interface{}
+				if err := json.Unmarshal([]byte(entry.ExtraParams), &ep); err == nil {
+					for key, value := range ep {
+						reqMap[key] = value
+					}
+				} else {
+					slog.Warn("解析模型级ExtraParams失败", "model", entry.Name, "error", err)
 				}
-			} else {
-				slog.Warn("解析ExtraParams失败", "error", err)
 			}
 		}
 

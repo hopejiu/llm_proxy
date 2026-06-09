@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { StatsService } from "../../bindings/github.com/wanglejiu/llm-proxy";
+import { StatsAPI } from "../services";
 
 export function useRecentLogs(limit: number = 50) {
   const [logs, setLogs] = useState<any[]>([]);
@@ -8,7 +8,7 @@ export function useRecentLogs(limit: number = 50) {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await StatsService.GetRecentLogs(limit);
+      const data = await StatsAPI.getRecentLogs(limit);
       setLogs(data);
     } catch {
       // ignore
@@ -31,7 +31,7 @@ export function useLogDetail() {
   const fetch = useCallback(async (id: number) => {
     setLoading(true);
     try {
-      const data = await StatsService.GetLogDetail(id);
+      const data = await StatsAPI.getLogDetail(id);
       setDetail(data);
     } catch {
       setDetail(null);

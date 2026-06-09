@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { StatsService } from "../../bindings/github.com/wanglejiu/llm-proxy";
+import { StatsAPI } from "../services";
 
 export function useStats(providerID: number = 0) {
   const [stats, setStats] = useState<any>(null);
@@ -10,7 +10,7 @@ export function useStats(providerID: number = 0) {
     setLoading(true);
     setError(null);
     try {
-      const data = await StatsService.GetStats(providerID);
+      const data = await StatsAPI.getStats(providerID);
       setStats(data);
     } catch (e: any) {
       setError(e?.message || "Failed to load stats");
@@ -33,7 +33,7 @@ export function useDailyStats(providerID: number = 0) {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await StatsService.GetDailyStats(providerID);
+      const data = await StatsAPI.getDailyStats(providerID);
       setDailyStats(data);
     } catch {
       // ignore

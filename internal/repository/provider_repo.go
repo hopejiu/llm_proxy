@@ -20,11 +20,17 @@ func (r *ProviderRepository) Create(provider *model.ProviderConfig) error {
 	return r.db.Create(provider).Error
 }
 
-// GetByID 根据ID获取Provider
+// GetByID 根据ID获取Provider（记录不存在时返回"已删除"占位，不报错）
 func (r *ProviderRepository) GetByID(id uint) (*model.ProviderConfig, error) {
 	var provider model.ProviderConfig
 	err := r.db.First(&provider, id).Error
 	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return &model.ProviderConfig{
+				ID:   id,
+				Name: "已删除",
+			}, nil
+		}
 		slog.Error("根据ID获取Provider失败", "id", id, "error", err)
 		return nil, err
 	}

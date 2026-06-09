@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"github.com/wanglejiu/llm-proxy/internal/config"
 	"github.com/wanglejiu/llm-proxy/internal/handler"
@@ -14,6 +15,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	sqlite "github.com/glebarez/sqlite"
@@ -80,6 +82,7 @@ func main() {
 
 	proxyService := service.NewProxyService(providerRepo, cfg)
 	providerSvc := service.NewProviderService(providerRepo, proxyService)
+	logSvc := service.NewLogService(requestLogRepo)
 	statsSvc := service.NewStatsService(hourlyStatRepo, requestLogRepo, providerSvc)
 	cleanupSvc := service.NewCleanupService(hourlyStatRepo, requestLogRepo, cfg)
 
@@ -99,7 +102,7 @@ func main() {
 
 	// 创建 Wails 3 绑定服务
 	providerBindingService := NewProviderService(providerSvc, cfg, proxyService)
-	statsBindingService := NewStatsService(statsSvc, providerSvc, tracker)
+	statsBindingService := NewStatsService(statsSvc, logSvc, providerSvc, tracker)
 	appBindingService := NewAppService(cfg, proxyHandler, anthropicHandler, ollamaHandler, logReader, dbFallbackMsg)
 	cleanupWrapper := NewCleanupServiceWrapper(cleanupSvc)
 
@@ -276,6 +279,7 @@ func migrateDB(db *gorm.DB, cfg *config.Config) {
 	}
 
 	migrateHourlyStats(db, cfg)
+	migrateProviderConfigs(db, cfg)
 	createIndexesIfNotExist(db, cfg)
 	slog.Info("数据库表初始化完成")
 }
@@ -372,6 +376,143 @@ func migrateHourlyStats(db *gorm.DB, cfg *config.Config) {
 	}
 
 	slog.Info("hourly_stats 表升级完成")
+}
+
+// migrateProviderConfigs 将旧的 model/alias/extra_params 字段迁移到新的 models JSON 字段
+// 防护：检查 models 列是否有数据 + 旧列是否存在，双重保障不重复执行
+func migrateProviderConfigs(db *gorm.DB, cfg *config.Config) {
+	// 1. 如果 models 列已存在且有数据 → 已迁移，直接跳过
+	if db.Migrator().HasColumn(&model.ProviderConfig{}, "Models") {
+		var count int64
+		db.Model(&model.ProviderConfig{}).Where("models IS NOT NULL AND models != ''").Count(&count)
+		if count > 0 {
+			// 旧列可能还未清理干净（上次 DROP 失败），再试一次
+			dropOldProviderColumns(db, cfg)
+			slog.Debug("provider_configs 已是新格式，跳过迁移", "rows", count)
+			return
+		}
+	}
+
+	// 2. 检查旧列是否存在（用 raw SQL 避免依赖 struct 字段）
+	hasOldCols := checkOldProviderColumnsExist(db, cfg)
+
+	// 如果旧列和 models 列都不存在 → 全新数据库，无事可做
+	if !hasOldCols && !db.Migrator().HasColumn(&model.ProviderConfig{}, "Models") {
+		return
+	}
+
+	// 3. 添加 models 列（如果还没有）
+	if !db.Migrator().HasColumn(&model.ProviderConfig{}, "Models") {
+		if err := db.Migrator().AddColumn(&model.ProviderConfig{}, "Models"); err != nil {
+			slog.Warn("添加 models 列失败", "error", err)
+			return
+		}
+	}
+
+	// 4. 如果旧列存在，迁移数据
+	if hasOldCols {
+		slog.Info("正在迁移 provider_configs 表到新的多模型格式...")
+
+		// 读取旧数据
+		type oldRow struct {
+			ID          uint
+			Models      string // 仅用于 Scan 占位
+			Model       string
+			Alias       string
+			ExtraParams string
+		}
+		var rows []oldRow
+		rawSQL := "SELECT id, model, alias, extra_params FROM provider_configs WHERE models IS NULL OR models = ''"
+		db.Raw(rawSQL).Scan(&rows)
+
+		for _, row := range rows {
+			entries := buildModelEntriesFromOld(row.Model, row.Alias, row.ExtraParams)
+			jsonBytes, _ := json.Marshal(entries)
+			if err := db.Model(&model.ProviderConfig{}).Where("id = ?", row.ID).Update("models", string(jsonBytes)).Error; err != nil {
+				slog.Warn("迁移 provider 失败", "id", row.ID, "error", err)
+			}
+		}
+
+		// 删除旧列
+		dropOldProviderColumns(db, cfg)
+		slog.Info("provider_configs 迁移完成")
+	}
+}
+
+// checkOldProviderColumnsExist 用 raw SQL 检查旧列是否存在
+func checkOldProviderColumnsExist(db *gorm.DB, cfg *config.Config) bool {
+	if cfg.IsSQLite() {
+		var cols []string
+		db.Raw("PRAGMA table_info(provider_configs)").Pluck("name", &cols)
+		for _, c := range cols {
+			if c == "model" || c == "alias" || c == "extra_params" {
+				return true
+			}
+		}
+		return false
+	}
+	// MySQL
+	var count int64
+	db.Raw(`SELECT COUNT(*) FROM information_schema.COLUMNS
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'provider_configs'
+		AND COLUMN_NAME IN ('model','alias','extra_params')`).Scan(&count)
+	return count > 0
+}
+
+// dropOldProviderColumns 删除旧的 model/alias/extra_params 列
+func dropOldProviderColumns(db *gorm.DB, cfg *config.Config) {
+	for _, col := range []string{"model", "alias", "extra_params"} {
+		if cfg.IsSQLite() {
+			if err := db.Exec("ALTER TABLE provider_configs DROP COLUMN " + col).Error; err != nil {
+				// SQLite 中列可能已不存在
+				slog.Debug("删除旧列失败（可能已不存在）", "column", col, "error", err)
+			} else {
+				slog.Info("已删除旧列", "column", col)
+			}
+		} else {
+			if err := db.Exec("ALTER TABLE provider_configs DROP COLUMN " + col).Error; err != nil {
+				slog.Debug("删除旧列失败（可能已不存在）", "column", col, "error", err)
+			} else {
+				slog.Info("已删除旧列", "column", col)
+			}
+		}
+	}
+}
+
+// buildModelEntriesFromOld 从旧的 model/alias/extra_params 构造 ModelEntry 列表
+func buildModelEntriesFromOld(modelName, alias, extraParams string) []model.ModelEntry {
+	if modelName == "" && alias == "" {
+		return nil
+	}
+
+	entry := model.ModelEntry{
+		Name:        modelName,
+		ExtraParams: extraParams,
+	}
+
+	// 解析旧格式的逗号分隔别名
+	if alias != "" {
+		var aliases []string
+		for _, a := range strings.Split(alias, ",") {
+			if trimmed := strings.TrimSpace(a); trimmed != "" {
+				aliases = append(aliases, trimmed)
+			}
+		}
+		entry.Aliases = aliases
+	}
+
+	// 如果 model 为空但 alias 不为空，用第一个 alias 作为 name
+	if entry.Name == "" && len(entry.Aliases) > 0 {
+		entry.Name = entry.Aliases[0]
+		entry.Aliases = entry.Aliases[1:]
+	}
+
+	// 如果 model 为空且没有别名，跳过
+	if entry.Name == "" {
+		return nil
+	}
+
+	return []model.ModelEntry{entry}
 }
 
 func cleanOldData(requestLogRepo *repository.RequestLogRepository, cleanupDays int, baseDir string) {

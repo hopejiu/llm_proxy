@@ -16,6 +16,7 @@ type anthropicStreamState struct {
 	c                   *gin.Context
 	provider            model.ProviderConfig
 	requestID           string
+	modelName           string // 解析后的上游模型名
 	msgID               string
 	fullContent         strings.Builder
 	thinkingContent     strings.Builder
@@ -31,12 +32,13 @@ type anthropicStreamState struct {
 }
 
 // newAnthropicStreamState 创建 Anthropic 流式状态
-func newAnthropicStreamState(h *AnthropicHandler, c *gin.Context, provider model.ProviderConfig, requestID string) *anthropicStreamState {
+func newAnthropicStreamState(h *AnthropicHandler, c *gin.Context, provider model.ProviderConfig, requestID string, modelName string) *anthropicStreamState {
 	return &anthropicStreamState{
 		handler:          h,
 		c:                c,
 		provider:         provider,
 		requestID:        requestID,
+		modelName:        modelName,
 		msgID:            fmt.Sprintf("msg_%d", time.Now().UnixNano()),
 		toolCallIndexMap: make(map[int]int),
 		tracker:          h.tracker,
@@ -55,7 +57,7 @@ func (s *anthropicStreamState) ensureMessageStarted(currentTokens *StreamTokens)
 			"type":    "message",
 			"role":    "assistant",
 			"content": []interface{}{},
-			"model":   s.provider.Model,
+			"model":   s.modelName,
 			"usage": map[string]interface{}{
 				"input_tokens":  currentTokens.InputTokens,
 				"output_tokens": 0,

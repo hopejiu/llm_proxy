@@ -16,14 +16,16 @@ import (
 type WebHandler struct {
 	providerService *service.ProviderService
 	statsService    *service.StatsService
+	logService      *service.LogService
 	tracker         *ActiveRequestTracker
 	cfg             *config.Config
 }
 
-func NewWebHandler(providerService *service.ProviderService, statsService *service.StatsService, tracker *ActiveRequestTracker, cfg *config.Config) *WebHandler {
+func NewWebHandler(providerService *service.ProviderService, statsService *service.StatsService, logService *service.LogService, tracker *ActiveRequestTracker, cfg *config.Config) *WebHandler {
 	return &WebHandler{
 		providerService: providerService,
 		statsService:    statsService,
+		logService:      logService,
 		tracker:         tracker,
 		cfg:             cfg,
 	}
@@ -174,7 +176,7 @@ func (h *WebHandler) GetRecentLogs(c *gin.Context) {
 		}
 	}
 
-	logs, err := h.statsService.GetRecentLogs(limit)
+	logs, err := h.logService.GetRecentLogs(limit)
 	if err != nil {
 		slog.Error("获取最近日志失败", "limit", limit, "error", err)
 		respondError(c, http.StatusInternalServerError, CodeInternal, "获取日志列表失败")
@@ -235,7 +237,7 @@ func (h *WebHandler) GetLogDetail(c *gin.Context) {
 		return
 	}
 
-	logDetail, err := h.statsService.GetLogDetail(uint(id))
+	logDetail, err := h.logService.GetLogDetail(uint(id))
 	if err != nil {
 		slog.Error("获取日志详情失败", "id", id, "error", err)
 		respondError(c, http.StatusNotFound, CodeNotFound, "日志不存在")

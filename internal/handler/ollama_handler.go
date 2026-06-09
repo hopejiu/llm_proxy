@@ -70,16 +70,18 @@ func (h *OllamaHandler) handleNonStreamChat(c *gin.Context, body []byte, startTi
 	// 更新活跃请求的 Provider 信息
 	h.tracker.UpdateProvider(requestID, provider.ID, provider.Name)
 
-	openAIReq := converter.OllamaToOpenAI(&ollamaReq, provider.Model)
+	resolvedModel := provider.ResolveModel(ollamaReq.Model)
+
+	openAIReq := converter.OllamaToOpenAI(&ollamaReq, resolvedModel)
 	openAIBody, _ := json.Marshal(openAIReq)
 	openAIBody = h.PrepareRequestBody(openAIBody, provider)
 
 	respBody, err := h.SendRequest(c.Request.Context(), provider.GetRequestURL(), openAIBody, provider.APIKey)
 	if err != nil {
 		statusCode, errMsg := ResolveUpstreamError(err)
-		slog.Error("ollama request", "requestID", requestID, "provider", provider.Name, "model", provider.Model, "status", "FAILED", "duration_ms", time.Since(startTime).Milliseconds(), "error", errMsg)
+		slog.Error("ollama request", "requestID", requestID, "provider", provider.Name, "model", resolvedModel, "status", "FAILED", "duration_ms", time.Since(startTime).Milliseconds(), "error", errMsg)
 		c.JSON(statusCode, model.OllamaChatResponse{
-			Model:      provider.Model,
+			Model:      resolvedModel,
 			CreatedAt:  time.Now().Format(time.RFC3339),
 			Message:    model.OllamaMessage{Role: "assistant", Content: errMsg},
 			Done:       true,
@@ -88,7 +90,7 @@ func (h *OllamaHandler) handleNonStreamChat(c *gin.Context, body []byte, startTi
 		return
 	}
 
-	ollamaResp := converter.OpenAIToOllama(respBody, provider.Model)
+	ollamaResp := converter.OpenAIToOllama(respBody, resolvedModel)
 	ollamaResp.CreatedAt = time.Now().Format(time.RFC3339)
 	ollamaResp.Done = true
 	ollamaResp.DoneReason = "stop"
@@ -104,7 +106,7 @@ func (h *OllamaHandler) handleNonStreamChat(c *gin.Context, body []byte, startTi
 
 	reqLog := &model.RequestLog{
 		ProviderID:      provider.ID,
-		Model:           provider.Model,
+		Model:           resolvedModel,
 		RequestBody:     string(openAIBody),
 		ResponseBody:    string(respBody),
 		ResponseContent: ollamaResp.Message.Content,
@@ -115,7 +117,7 @@ func (h *OllamaHandler) handleNonStreamChat(c *gin.Context, body []byte, startTi
 		Duration:        time.Since(startTime).Milliseconds(),
 	}
 	h.SaveRequestLog(reqLog)
-	slog.Info("ollama request", "requestID", requestID, "provider", provider.Name, "model", provider.Model, "status", "SUCCESS", "duration_ms", time.Since(startTime).Milliseconds())
+	slog.Info("ollama request", "requestID", requestID, "provider", provider.Name, "model", resolvedModel, "status", "SUCCESS", "duration_ms", time.Since(startTime).Milliseconds())
 
 	// 非流式请求完成后，将响应内容追加到 tracker
 	if reqLog.ResponseContent != "" {
@@ -146,7 +148,9 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, body []byte, startTime 
 	// 更新活跃请求的 Provider 信息
 	h.tracker.UpdateProvider(requestID, provider.ID, provider.Name)
 
-	openAIReq := converter.OllamaToOpenAI(&ollamaReq, provider.Model)
+	resolvedModel := provider.ResolveModel(ollamaReq.Model)
+
+	openAIReq := converter.OllamaToOpenAI(&ollamaReq, resolvedModel)
 	openAIBody, _ := json.Marshal(openAIReq)
 	openAIBody = h.PrepareRequestBody(openAIBody, provider)
 
@@ -171,7 +175,7 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, body []byte, startTime 
 					return false
 				}
 
-				ollamaChunk := converter.OpenAIStreamToOllamaChunk(streamResp, provider.Model)
+				ollamaChunk := converter.OpenAIStreamToOllamaChunk(streamResp, resolvedModel)
 				fullContent.WriteString(ollamaChunk.Message.Content)
 				tracker.AppendResponse(requestID, ollamaChunk.Message.Content)
 
@@ -191,11 +195,11 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, body []byte, startTime 
 	)
 
 	if lastErr != nil {
-		slog.Error("ollama request", "requestID", requestID, "provider", provider.Name, "model", provider.Model, "status", "FAILED", "duration_ms", time.Since(startTime).Milliseconds(), "error", lastErr.Error())
+		slog.Error("ollama request", "requestID", requestID, "provider", provider.Name, "model", resolvedModel, "status", "FAILED", "duration_ms", time.Since(startTime).Milliseconds(), "error", lastErr.Error())
 		h.sendOllamaStreamError(c, lastErr.Error())
 		// 超时/错误时也必须发送 done:true 的最终消息，否则客户端会一直挂起等待
 		finalResp := model.OllamaChatResponse{
-			Model:      provider.Model,
+			Model:      resolvedModel,
 			CreatedAt:  time.Now().Format(time.RFC3339),
 			Done:       true,
 			DoneReason: "error",
@@ -206,7 +210,7 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, body []byte, startTime 
 	}
 
 	finalResp := model.OllamaChatResponse{
-		Model:           provider.Model,
+		Model:           resolvedModel,
 		CreatedAt:       time.Now().Format(time.RFC3339),
 		Message:         model.OllamaMessage{Role: "assistant", Content: ""},
 		Done:            true,
@@ -220,7 +224,7 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, body []byte, startTime 
 
 	reqLog := &model.RequestLog{
 		ProviderID:      provider.ID,
-		Model:           provider.Model,
+		Model:           resolvedModel,
 		RequestBody:     string(openAIBody),
 		ResponseBody:    responseBuilder.String(),
 		ResponseContent: fullContent.String(),
@@ -233,7 +237,7 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, body []byte, startTime 
 
 	h.SaveRequestLog(reqLog)
 
-	slog.Info("ollama request", "requestID", requestID, "provider", provider.Name, "model", provider.Model, "status", "STREAM_END", "duration_ms", time.Since(startTime).Milliseconds())
+	slog.Info("ollama request", "requestID", requestID, "provider", provider.Name, "model", resolvedModel, "status", "STREAM_END", "duration_ms", time.Since(startTime).Milliseconds())
 }
 
 // Tags 处理 /api/tags 请求

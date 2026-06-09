@@ -9,19 +9,9 @@ import { Create as $Create } from "@wailsio/runtime";
 // @ts-ignore: Unused imports
 import * as handler$0 from "./internal/handler/models.js";
 
-/**
- * ActiveRequestVO 活跃请求视图，直接复用 handler.ActiveRequest
- */
 export const ActiveRequestVO = handler$0.ActiveRequest;
-
-/**
- * ActiveRequestVO 活跃请求视图，直接复用 handler.ActiveRequest
- */
 export type ActiveRequestVO = handler$0.ActiveRequest;
 
-/**
- * CodeBuddyResultVO CodeBuddy 配置结果
- */
 export class CodeBuddyResultVO {
     "message": string;
     "path": string;
@@ -59,9 +49,6 @@ export class CodeBuddyResultVO {
     }
 }
 
-/**
- * HourlyStatBreakdownVO 分时按 Provider 拆分的详细视图（用于堆叠图）
- */
 export class HourlyStatBreakdownVO {
     "hour": number;
     "provider_id": number;
@@ -103,9 +90,6 @@ export class HourlyStatBreakdownVO {
     }
 }
 
-/**
- * LogEntryVO 日志条目视图
- */
 export class LogEntryVO {
     "time": string;
     "level": string;
@@ -135,18 +119,13 @@ export class LogEntryVO {
     }
 }
 
-/**
- * ProviderCreateVO 前端创建 Provider 时提交
- */
 export class ProviderCreateVO {
     "name": string;
     "auto_suffix": boolean;
     "url_suffix": string;
     "base_url": string;
     "api_key": string;
-    "model": string;
-    "alias": string;
-    "extra_params": string;
+    "models": string;
 
     /** Creates a new ProviderCreateVO instance. */
     constructor($$source: Partial<ProviderCreateVO> = {}) {
@@ -165,14 +144,8 @@ export class ProviderCreateVO {
         if (!("api_key" in $$source)) {
             this["api_key"] = "";
         }
-        if (!("model" in $$source)) {
-            this["model"] = "";
-        }
-        if (!("alias" in $$source)) {
-            this["alias"] = "";
-        }
-        if (!("extra_params" in $$source)) {
-            this["extra_params"] = "";
+        if (!("models" in $$source)) {
+            this["models"] = "";
         }
 
         Object.assign(this, $$source);
@@ -187,18 +160,13 @@ export class ProviderCreateVO {
     }
 }
 
-/**
- * ProviderUpdateVO 前端更新 Provider 时提交（API Key 可能是脱敏格式）
- */
 export class ProviderUpdateVO {
     "name": string;
     "auto_suffix": boolean;
     "url_suffix": string;
     "base_url": string;
     "api_key": string;
-    "model": string;
-    "alias": string;
-    "extra_params": string;
+    "models": string;
 
     /** Creates a new ProviderUpdateVO instance. */
     constructor($$source: Partial<ProviderUpdateVO> = {}) {
@@ -217,14 +185,8 @@ export class ProviderUpdateVO {
         if (!("api_key" in $$source)) {
             this["api_key"] = "";
         }
-        if (!("model" in $$source)) {
-            this["model"] = "";
-        }
-        if (!("alias" in $$source)) {
-            this["alias"] = "";
-        }
-        if (!("extra_params" in $$source)) {
-            this["extra_params"] = "";
+        if (!("models" in $$source)) {
+            this["models"] = "";
         }
 
         Object.assign(this, $$source);
@@ -239,9 +201,6 @@ export class ProviderUpdateVO {
     }
 }
 
-/**
- * ProviderVO 返回给前端的 Provider 视图（API Key 脱敏）
- */
 export class ProviderVO {
     "id": number;
     "name": string;
@@ -249,9 +208,7 @@ export class ProviderVO {
     "url_suffix": string;
     "base_url": string;
     "api_key": string;
-    "model": string;
-    "alias": string;
-    "extra_params": string;
+    "models": string;
     "created_at": string;
     "updated_at": string;
 
@@ -275,14 +232,8 @@ export class ProviderVO {
         if (!("api_key" in $$source)) {
             this["api_key"] = "";
         }
-        if (!("model" in $$source)) {
-            this["model"] = "";
-        }
-        if (!("alias" in $$source)) {
-            this["alias"] = "";
-        }
-        if (!("extra_params" in $$source)) {
-            this["extra_params"] = "";
+        if (!("models" in $$source)) {
+            this["models"] = "";
         }
         if (!("created_at" in $$source)) {
             this["created_at"] = "";
@@ -303,9 +254,6 @@ export class ProviderVO {
     }
 }
 
-/**
- * ProxyStatusVO 代理服务状态
- */
 export class ProxyStatusVO {
     "status": string;
     "port": string;
@@ -332,9 +280,6 @@ export class ProxyStatusVO {
     }
 }
 
-/**
- * RequestLogDetailVO 请求日志详情（含请求体和响应体）
- */
 export class RequestLogDetailVO {
     "id": number;
     "provider_id": number;
@@ -416,9 +361,6 @@ export class RequestLogDetailVO {
     }
 }
 
-/**
- * RequestLogVO 请求日志列表视图
- */
 export class RequestLogVO {
     "id": number;
     "provider_id": number;

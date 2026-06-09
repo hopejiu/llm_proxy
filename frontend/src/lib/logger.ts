@@ -1,18 +1,10 @@
-import { AppService } from "../../bindings/github.com/wanglejiu/llm-proxy";
+import { AppAPI } from "../services";
 
 const logger = {
-  debug(msg: string) {
-    AppService.LogDebug(msg).catch(() => {});
-  },
-  info(msg: string) {
-    AppService.LogInfo(msg).catch(() => {});
-  },
-  warn(msg: string) {
-    AppService.LogWarn(msg).catch(() => {});
-  },
-  error(msg: string) {
-    AppService.LogError(msg).catch(() => {});
-  },
+  debug(msg: string) { AppAPI.logDebug(msg); },
+  info(msg: string) { AppAPI.logInfo(msg); },
+  warn(msg: string) { AppAPI.logWarn(msg); },
+  error(msg: string) { AppAPI.logError(msg); },
 };
 
 export default logger;

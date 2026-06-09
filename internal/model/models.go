@@ -1,12 +1,20 @@
 package model
 
 import (
+	"encoding/json"
 	"strings"
 	"time"
 )
 
 // DeletedProviderID 当 Provider 被删除时，关联日志的 ProviderID 置为此值
 const DeletedProviderID uint = 999
+
+// ModelEntry 单个模型配置（存储在 ProviderConfig.Models JSON 中）
+type ModelEntry struct {
+	Name        string   `json:"name"`         // 发送给上游的模型名，如 "gpt-4"
+	Aliases     []string `json:"aliases"`       // 客户端可用的模型名列表，如 ["my-gpt4", "gpt4-custom"]
+	ExtraParams string   `json:"extra_params"`  // 该模型独有扩展参数 (JSON)
+}
 
 // ProviderConfig 第三方LLM服务商配置
 type ProviderConfig struct {
@@ -16,9 +24,7 @@ type ProviderConfig struct {
 	UrlSuffix   string    `json:"url_suffix" gorm:"size:200;default:''"`
 	BaseURL     string    `json:"base_url" gorm:"size:500;not null"`
 	APIKey      string    `json:"api_key" gorm:"size:500;not null"`
-	Model       string    `json:"model" gorm:"size:100"`
-	Alias       string    `json:"alias" gorm:"size:200"`
-	ExtraParams string    `json:"extra_params" gorm:"type:text"`
+	Models      string    `json:"models" gorm:"type:text"` // JSON 数组 [ModelEntry, ...]
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -32,25 +38,84 @@ func (p *ProviderConfig) MaskAPIKey() string {
 	return key[:4] + "****" + key[len(key)-4:]
 }
 
-// GetDisplayName 获取用于模型列表显示的名称，优先别名
-func (p *ProviderConfig) GetDisplayName() string {
-	if p.Alias != "" {
-		return strings.TrimSpace(strings.Split(p.Alias, ",")[0])
+// ParseModels 解析 Models JSON 为 ModelEntry 列表
+func (p *ProviderConfig) ParseModels() []ModelEntry {
+	if p.Models == "" {
+		return nil
 	}
-	return p.Model
+	var entries []ModelEntry
+	if err := json.Unmarshal([]byte(p.Models), &entries); err != nil {
+		return nil
+	}
+	return entries
 }
 
-// GetModelNames 获取所有可用于请求的模型名称列表（别名 + 模型名）
-func (p *ProviderConfig) GetModelNames() []string {
-	var names []string
-	if p.Alias != "" {
-		for _, a := range strings.Split(p.Alias, ",") {
-			if trimmed := strings.TrimSpace(a); trimmed != "" {
-				names = append(names, trimmed)
+// FindModelEntry 根据客户端模型名查找匹配的 ModelEntry
+// 先匹配 aliases，再匹配 name
+func (p *ProviderConfig) FindModelEntry(clientName string) *ModelEntry {
+	entries := p.ParseModels()
+	for i := range entries {
+		if entries[i].Name == clientName {
+			return &entries[i]
+		}
+		for _, alias := range entries[i].Aliases {
+			if alias == clientName {
+				return &entries[i]
 			}
 		}
 	}
-	names = append(names, p.Model)
+	// 兼容旧数据：如果 Models 为空但有 model/alias 旧字段（migration 前），返回 nil
+	if len(entries) > 0 {
+		return &entries[0] // 兜底返回第一个
+	}
+	return nil
+}
+
+// ResolveModel 将客户端模型名解析为上游模型名
+func (p *ProviderConfig) ResolveModel(clientName string) string {
+	if entry := p.FindModelEntry(clientName); entry != nil {
+		return entry.Name
+	}
+	return ""
+}
+
+// GetModelExtraParams 获取匹配到的 ModelEntry 的扩展参数
+func (p *ProviderConfig) GetModelExtraParams(clientName string) string {
+	if entry := p.FindModelEntry(clientName); entry != nil {
+		return entry.ExtraParams
+	}
+	return ""
+}
+
+// GetDisplayName 获取用于模型列表显示的名称（第一个 entry 的第一个 alias，兜底第一个 entry 的 name）
+func (p *ProviderConfig) GetDisplayName() string {
+	entries := p.ParseModels()
+	if len(entries) == 0 {
+		return ""
+	}
+	if len(entries[0].Aliases) > 0 {
+		return entries[0].Aliases[0]
+	}
+	return entries[0].Name
+}
+
+// GetModelNames 获取所有可用于请求的模型名称列表（所有 entry 的 name + aliases）
+func (p *ProviderConfig) GetModelNames() []string {
+	entries := p.ParseModels()
+	seen := make(map[string]bool)
+	var names []string
+	for _, e := range entries {
+		for _, alias := range e.Aliases {
+			if alias != "" && !seen[alias] {
+				names = append(names, alias)
+				seen[alias] = true
+			}
+		}
+		if e.Name != "" && !seen[e.Name] {
+			names = append(names, e.Name)
+			seen[e.Name] = true
+		}
+	}
 	return names
 }
 

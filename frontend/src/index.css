@@ -1,25 +1,258 @@
+@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
-  color-scheme: dark;
-  color: #e0e0e0;
-  background-color: #1a1a2e;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+@layer base {
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background-color: #FAF5FF;
+    color: #1E1B2E;
+    font-family: 'Fira Sans', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+
+  ::selection {
+    background-color: #7C3AED;
+    color: #FFFFFF;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #DDD6FE;
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #C4B5FD;
+  }
 }
 
-body {
-  margin: 0;
-  min-height: 100vh;
+@layer components {
+  /* Cards */
+  .card {
+    @apply bg-white border border-[#EDE9FE] rounded-xl;
+  }
+
+  .card-header {
+    @apply flex items-center justify-between mb-4;
+  }
+
+  .card-title {
+    @apply text-sm font-semibold text-[#1E1B2E];
+  }
+
+  /* Buttons */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-1.5 px-4 py-2 text-sm font-medium text-white
+           bg-brand-600 rounded-lg hover:bg-brand-700 active:bg-brand-800
+           transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed
+           focus:outline-none focus:ring-2 focus:ring-brand-600/30;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-1.5 px-4 py-2 text-sm font-medium text-brand-700
+           bg-brand-50 border border-brand-200 rounded-lg
+           hover:bg-brand-100 active:bg-brand-200
+           transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed
+           focus:outline-none focus:ring-2 focus:ring-brand-600/20;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm text-[#6B6580]
+           hover:text-brand-600 hover:bg-brand-50 rounded-lg
+           transition-all duration-150;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-1.5 px-4 py-2 text-sm font-medium text-white
+           bg-red-600 rounded-lg hover:bg-red-700 active:bg-red-800
+           transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  /* Inputs */
+  .input-field {
+    @apply w-full border border-[#EDE9FE] rounded-lg px-3 py-2 text-sm text-[#1E1B2E]
+           bg-white placeholder-[#9C94B0]
+           focus:outline-none focus:ring-2 focus:ring-brand-600/20 focus:border-brand-600
+           transition-all duration-150;
+  }
+
+  .input-error {
+    @apply input-field border-red-300 focus:ring-red-400/20 focus:border-red-400;
+  }
+
+  textarea.input-field {
+    @apply resize-y min-h-[80px];
+  }
+
+  select.input-field {
+    @apply appearance-none bg-white;
+  }
+
+  /* Badges */
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-md;
+  }
+
+  .badge-purple {
+    @apply badge bg-brand-50 text-brand-700;
+  }
+
+  .badge-green {
+    @apply badge bg-emerald-50 text-emerald-700;
+  }
+
+  .badge-red {
+    @apply badge bg-red-50 text-red-700;
+  }
+
+  .badge-yellow {
+    @apply badge bg-amber-50 text-amber-700;
+  }
+
+  .badge-blue {
+    @apply badge bg-blue-50 text-blue-700;
+  }
+
+  /* Tables */
+  .table-wrap {
+    @apply overflow-x-auto;
+  }
+
+  .table-base {
+    @apply w-full text-sm;
+  }
+
+  .table-th {
+    @apply text-left py-3 px-3 text-xs font-semibold text-[#6B6580] uppercase tracking-wider;
+  }
+
+  .table-td {
+    @apply py-3 px-3 text-sm text-[#1E1B2E];
+  }
+
+  .table-tr {
+    @apply border-b border-[#F0EBF5] hover:bg-[#FAF5FF] transition-colors;
+  }
+
+  /* Modals */
+  .modal-overlay {
+    @apply fixed inset-0 bg-black/30 flex items-center justify-center z-50 backdrop-blur-sm;
+  }
+
+  .modal-content {
+    @apply bg-white border border-[#EDE9FE] rounded-xl shadow-2xl w-full max-w-lg mx-4 max-h-[85vh] flex flex-col;
+  }
+  @media (max-width: 640px) {
+    .modal-content { @apply max-w-[95vw] mx-2; }
+  }
+
+  .modal-header {
+    @apply flex items-center justify-between px-6 py-4 border-b border-[#F0EBF5];
+  }
+
+  .modal-body {
+    @apply flex-1 overflow-auto px-6 py-4 space-y-4;
+  }
+
+  .modal-footer {
+    @apply flex items-center justify-end gap-3 px-6 py-4 border-t border-[#F0EBF5];
+  }
+
+  @keyframes slide-in-from-right {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+.slide-in-from-right { animation: slide-in-from-right 0.3s ease-out; }
+
+  /* Toggle switch */
+  .toggle {
+    @apply relative inline-flex items-center cursor-pointer;
+  }
+
+  .toggle-track {
+    @apply w-9 h-5 rounded-full transition-colors duration-200 bg-[#E8E0F0];
+  }
+
+  .toggle-input:checked + .toggle-track {
+    @apply bg-brand-600;
+  }
+
+  .toggle-thumb {
+    @apply absolute top-0.5 left-0.5 bg-white rounded-full h-4 w-4 transition-transform duration-200 shadow-sm;
+  }
+
+  .toggle-input:checked ~ .toggle-thumb {
+    @apply translate-x-4;
+  }
+
+  /* Status dot */
+  .status-dot {
+    @apply w-2 h-2 rounded-full;
+  }
+
+  .status-dot-running {
+    @apply status-dot bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.5)];
+  }
+
+  .status-dot-stopped {
+    @apply status-dot bg-red-400;
+  }
+
+  .status-dot-starting {
+    @apply status-dot bg-amber-400 animate-pulse;
+  }
+
+  /* Labels */
+  .form-label {
+    @apply block text-xs font-medium text-[#6B6580] mb-1;
+  }
+
+  .form-helper {
+    @apply text-[11px] text-[#9C94B0] mt-1;
+  }
+
+  /* Page container */
+  .page-container {
+    @apply p-6 space-y-6;
+  }
+
+  .page-header {
+    @apply flex items-center justify-between;
+  }
+
+  .page-title {
+    @apply text-xl font-bold text-[#1E1B2E];
+  }
+
+  /* Section */
+  .section-card {
+    @apply card p-5;
+  }
+
+  /* Stat card */
+  .stat-card {
+    @apply card p-5;
+  }
 }
 
-#root {
-  min-height: 100vh;
+/* ECharts light theme overrides */
+.echarts-light text {
+  fill: #6B6580 !important;
 }

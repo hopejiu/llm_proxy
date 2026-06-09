@@ -15,14 +15,16 @@ import (
 // StatsService Wails 绑定服务：统计和日志
 type StatsService struct {
 	statsSvc       *service.StatsService
+	logSvc         *service.LogService
 	providerSvc    *service.ProviderService
 	tracker        *handler.ActiveRequestTracker
 	ctx            context.Context
 }
 
-func NewStatsService(statsSvc *service.StatsService, providerSvc *service.ProviderService, tracker *handler.ActiveRequestTracker) *StatsService {
+func NewStatsService(statsSvc *service.StatsService, logSvc *service.LogService, providerSvc *service.ProviderService, tracker *handler.ActiveRequestTracker) *StatsService {
 	return &StatsService{
 		statsSvc:    statsSvc,
+		logSvc:      logSvc,
 		providerSvc: providerSvc,
 		tracker:     tracker,
 	}
@@ -108,7 +110,7 @@ func (s *StatsService) GetRecentLogs(limit int) ([]RequestLogVO, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	logs, err := s.statsSvc.GetRecentLogs(limit)
+	logs, err := s.logSvc.GetRecentLogs(limit)
 	if err != nil {
 		slog.Error("获取最近日志失败", "limit", limit, "error", err)
 		return nil, NewAppError("INTERNAL", "获取日志列表失败")
@@ -127,7 +129,7 @@ func (s *StatsService) GetRecentLogs(limit int) ([]RequestLogVO, error) {
 
 // GetLogDetail 获取单条请求日志详情
 func (s *StatsService) GetLogDetail(id uint) (RequestLogDetailVO, error) {
-	logDetail, err := s.statsSvc.GetLogDetail(id)
+	logDetail, err := s.logSvc.GetLogDetail(id)
 	if err != nil {
 		slog.Error("获取日志详情失败", "id", id, "error", err)
 		return RequestLogDetailVO{}, NewAppError("NOT_FOUND", "日志不存在")

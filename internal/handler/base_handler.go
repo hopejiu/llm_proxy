@@ -306,6 +306,7 @@ func (h *BaseHandler) ExtractUsage(data map[string]interface{}) (inputTokens, ou
 }
 
 // SendRequestWithRetry 发送普通 HTTP 请求（带重试）
+// 4xx 客户端错误不重试（如 429 限流），仅对 5xx 和网络错误重试
 func (h *BaseHandler) SendRequestWithRetry(ctx context.Context, url string, body []byte, apiKey string, maxRetries int) ([]byte, error) {
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries+1; attempt++ {
@@ -319,6 +320,13 @@ func (h *BaseHandler) SendRequestWithRetry(ctx context.Context, url string, body
 		if err == nil {
 			return respBody, nil
 		}
+
+		// 4xx 客户端错误不重试（429 限流、401 未授权等）
+		if upErr, ok := err.(*UpstreamError); ok && upErr.StatusCode >= 400 && upErr.StatusCode < 500 {
+			slog.Debug("非流式请求 4xx，不重试", "url", url, "status", upErr.StatusCode, "error", upErr.Body)
+			return nil, err
+		}
+
 		lastErr = err
 		slog.Debug("非流式请求失败", "url", url, "attempt", attempt, "error", err)
 	}
@@ -377,11 +385,16 @@ func (h *BaseHandler) SaveRequestLog(reqLog *model.RequestLog) {
 	}
 }
 
-// CreateRequestLog 创建请求日志对象
+// CreateRequestLog 创建请求日志对象，模型名从改写后的请求体中提取
 func (h *BaseHandler) CreateRequestLog(provider model.ProviderConfig, reqBody string) *model.RequestLog {
+	var reqInfo struct {
+		Model string `json:"model"`
+	}
+	json.Unmarshal([]byte(reqBody), &reqInfo)
+
 	return &model.RequestLog{
 		ProviderID:  provider.ID,
-		Model:       provider.Model,
+		Model:       reqInfo.Model,
 		RequestBody: reqBody,
 		Status:      "error",
 	}
@@ -430,7 +443,7 @@ func (h *BaseHandler) ExecuteStreamWithRetry(
 
 			// 重试延迟：次数 * 0.5s
 			retryDelay := time.Duration(attempt) * h.cfg.GetRetryDelayBase()
-			slog.Warn("流式请求重试", "provider", provider.Name, "model", provider.Model, "attempt", attempt, "maxRetries", config.MaxRetries, "delay", retryDelay)
+			slog.Warn("流式请求重试", "provider", provider.Name, "attempt", attempt, "maxRetries", config.MaxRetries, "delay", retryDelay)
 			time.Sleep(retryDelay)
 		}
 
@@ -438,6 +451,11 @@ func (h *BaseHandler) ExecuteStreamWithRetry(
 		httpResp, err := h.SendStreamRequest(ctx, provider.GetRequestURL(), body, provider.APIKey)
 		if err != nil {
 			slog.Debug("发送HTTP请求失败", "provider", provider.Name, "attempt", attempt, "error", err)
+			// 4xx 客户端错误不重试（429 限流、401 未授权等）
+			if upErr, ok := err.(*UpstreamError); ok && upErr.StatusCode >= 400 && upErr.StatusCode < 500 {
+				slog.Debug("流式请求 4xx，不重试", "provider", provider.Name, "status", upErr.StatusCode)
+				return responseBuilder, tokens, err
+			}
 			lastErr = err
 			continue
 		}

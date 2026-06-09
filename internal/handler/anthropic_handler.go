@@ -65,14 +65,16 @@ func (h *AnthropicHandler) handleNonStreamMessages(c *gin.Context, body []byte, 
 
 	h.tracker.UpdateProvider(requestID, provider.ID, provider.Name)
 
-	openAIReq := converter.AnthropicToOpenAI(&anthropicReq, provider.Model)
+	resolvedModel := provider.ResolveModel(anthropicReq.Model)
+
+	openAIReq := converter.AnthropicToOpenAI(&anthropicReq, resolvedModel)
 	openAIBody, _ := json.Marshal(openAIReq)
 	openAIBody = h.PrepareRequestBody(openAIBody, provider)
 
 	respBody, err := h.SendRequest(c.Request.Context(), provider.GetRequestURL(), openAIBody, provider.APIKey)
 	if err != nil {
 		statusCode, errMsg := ResolveUpstreamError(err)
-		slog.Error("anthropic request", "requestID", requestID, "provider", provider.Name, "model", provider.Model, "status", "FAILED", "duration_ms", time.Since(startTime).Milliseconds(), "error", errMsg)
+		slog.Error("anthropic request", "requestID", requestID, "provider", provider.Name, "model", resolvedModel, "status", "FAILED", "duration_ms", time.Since(startTime).Milliseconds(), "error", errMsg)
 		c.JSON(statusCode, gin.H{
 			"type":  "error",
 			"error": gin.H{"type": "api_error", "message": errMsg},
@@ -80,7 +82,7 @@ func (h *AnthropicHandler) handleNonStreamMessages(c *gin.Context, body []byte, 
 		return
 	}
 
-	anthropicResp := converter.OpenAIToAnthropic(respBody, provider.Model)
+	anthropicResp := converter.OpenAIToAnthropic(respBody, resolvedModel)
 
 	// 从 OpenAI 响应中提取 reasoning_content
 	var thinkingContent string
@@ -99,7 +101,7 @@ func (h *AnthropicHandler) handleNonStreamMessages(c *gin.Context, body []byte, 
 
 	reqLog := &model.RequestLog{
 		ProviderID:      provider.ID,
-		Model:           provider.Model,
+		Model:           resolvedModel,
 		RequestBody:     string(openAIBody),
 		ResponseBody:    string(respBody),
 		ResponseContent: converter.ExtractTextFromAnthropicContent(anthropicResp.Content),
@@ -112,7 +114,7 @@ func (h *AnthropicHandler) handleNonStreamMessages(c *gin.Context, body []byte, 
 		Duration:        time.Since(startTime).Milliseconds(),
 	}
 	h.SaveRequestLog(reqLog)
-	slog.Info("anthropic request", "requestID", requestID, "provider", provider.Name, "model", provider.Model, "status", "SUCCESS", "duration_ms", time.Since(startTime).Milliseconds())
+	slog.Info("anthropic request", "requestID", requestID, "provider", provider.Name, "model", resolvedModel, "status", "SUCCESS", "duration_ms", time.Since(startTime).Milliseconds())
 
 	// 非流式请求完成后，将响应内容追加到 tracker
 	if reqLog.ResponseContent != "" {
@@ -141,15 +143,17 @@ func (h *AnthropicHandler) handleStreamMessages(c *gin.Context, body []byte, sta
 
 	h.tracker.UpdateProvider(requestID, provider.ID, provider.Name)
 
+	resolvedModel := provider.ResolveModel(anthropicReq.Model)
+
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	CloseClientConnection(c)
-	
-	openAIReq := converter.AnthropicToOpenAI(&anthropicReq, provider.Model)
+
+	openAIReq := converter.AnthropicToOpenAI(&anthropicReq, resolvedModel)
 	openAIBody, _ := json.Marshal(openAIReq)
 	openAIBody = h.PrepareRequestBody(openAIBody, provider)
 
-	state := newAnthropicStreamState(h, c, provider, requestID)
+	state := newAnthropicStreamState(h, c, provider, requestID, resolvedModel)
 
 	responseBuilder, tokens, lastErr := h.ExecuteStreamWithRetry(
 		c.Request.Context(),
@@ -162,7 +166,7 @@ func (h *AnthropicHandler) handleStreamMessages(c *gin.Context, body []byte, sta
 	)
 
 	if lastErr != nil {
-		slog.Error("anthropic request", "requestID", requestID, "provider", provider.Name, "model", provider.Model, "status", "FAILED", "duration_ms", time.Since(startTime).Milliseconds(), "error", lastErr.Error())
+		slog.Error("anthropic request", "requestID", requestID, "provider", provider.Name, "model", resolvedModel, "status", "FAILED", "duration_ms", time.Since(startTime).Milliseconds(), "error", lastErr.Error())
 		h.sendAnthropicSSEError(c, lastErr.Error())
 		// 超时/错误时也必须关闭流状态并发送 [DONE]，否则客户端会一直挂起等待
 		state.finalize(&tokens)
@@ -178,7 +182,7 @@ func (h *AnthropicHandler) handleStreamMessages(c *gin.Context, body []byte, sta
 
 	reqLog := &model.RequestLog{
 		ProviderID:      provider.ID,
-		Model:           provider.Model,
+		Model:           resolvedModel,
 		RequestBody:     string(openAIBody),
 		ResponseBody:    responseBuilder.String(),
 		ResponseContent: state.fullContent.String(),
@@ -193,7 +197,7 @@ func (h *AnthropicHandler) handleStreamMessages(c *gin.Context, body []byte, sta
 
 	h.SaveRequestLog(reqLog)
 
-	slog.Info("anthropic request", "requestID", requestID, "provider", provider.Name, "model", provider.Model, "status", "STREAM_END", "duration_ms", time.Since(startTime).Milliseconds())
+	slog.Info("anthropic request", "requestID", requestID, "provider", provider.Name, "model", resolvedModel, "status", "STREAM_END", "duration_ms", time.Since(startTime).Milliseconds())
 }
 
 // Models 处理 /anthropic/v1/models 请求

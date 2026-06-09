@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { AppService } from "../../bindings/github.com/wanglejiu/llm-proxy";
+import { AppAPI } from "../services";
 
 interface LogEntry {
   time: string;
@@ -15,7 +15,7 @@ export function useLogHistory() {
   const loadInitial = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await AppService.GetLogHistory();
+      const data = await AppAPI.getLogHistory();
       setLogs(data || []);
     } catch {
       setLogs([]);
@@ -26,7 +26,7 @@ export function useLogHistory() {
 
   const pollNewLogs = useCallback(async () => {
     try {
-      const newEntries = await AppService.GetNewLogs();
+      const newEntries = await AppAPI.getNewLogs();
       if (newEntries && newEntries.length > 0) {
         setLogs((prev) => [...prev, ...newEntries]);
       }

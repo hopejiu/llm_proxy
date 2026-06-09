@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { ProviderService } from "../../bindings/github.com/wanglejiu/llm-proxy";
+import { ProviderAPI } from "../services";
 
 interface ProviderVO {
   id: number;
@@ -8,9 +8,7 @@ interface ProviderVO {
   url_suffix: string;
   base_url: string;
   api_key: string;
-  model: string;
-  alias: string;
-  extra_params: string;
+  models: string;
   created_at: string;
   updated_at: string;
 }
@@ -24,7 +22,7 @@ export function useProviders() {
     setLoading(true);
     setError(null);
     try {
-      const data = await ProviderService.GetProviders();
+      const data = await ProviderAPI.getProviders();
       setProviders(data);
     } catch (e: any) {
       setError(e?.message || "Failed to load providers");

@@ -102,16 +102,6 @@ func (s *StatsService) GetLast30DaysStats(providerID uint) ([]model.TokenStats, 
 	return dailyStats, nil
 }
 
-// GetRecentLogs 获取最近的请求日志
-func (s *StatsService) GetRecentLogs(limit int) ([]model.RequestLog, error) {
-	return s.requestLogRepo.GetRecent(limit)
-}
-
-// GetLogDetail 获取单条请求日志详情
-func (s *StatsService) GetLogDetail(id uint) (*model.RequestLog, error) {
-	return s.requestLogRepo.GetByID(id)
-}
-
 // GetTodayHourlyStats 获取今日分时统计（汇总表已完成小时 + 明细表当前小时，保证实时性）
 func (s *StatsService) GetTodayHourlyStats(providerID uint) ([]model.HourlyStatsResult, error) {
 	// 从汇总表获取今日已完成小时的统计
