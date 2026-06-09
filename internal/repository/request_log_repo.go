@@ -3,31 +3,29 @@ package repository
 import (
 	"database/sql"
 	"fmt"
-	"github.com/wanglejiu/llm-proxy/internal/model"
 	"log/slog"
 	"time"
 
-	"gorm.io/gorm"
+	"github.com/wanglejiu/llm-proxy/internal/model"
 )
 
 type RequestLogRepository struct {
-	db     *gorm.DB
-	dbType string
+	dbManager *DBManager
 }
 
-func NewRequestLogRepository(db *gorm.DB, dbType string) *RequestLogRepository {
-	return &RequestLogRepository{db: db, dbType: dbType}
+func NewRequestLogRepository(dbManager *DBManager) *RequestLogRepository {
+	return &RequestLogRepository{dbManager: dbManager}
 }
 
 // Create 创建请求日志
 func (r *RequestLogRepository) Create(log *model.RequestLog) error {
-	return r.db.Create(log).Error
+	return r.dbManager.GetDB().Create(log).Error
 }
 
 // GetByID 根据ID获取日志（含完整大字段，用于查看详情）
 func (r *RequestLogRepository) GetByID(id uint) (*model.RequestLog, error) {
 	var requestLog model.RequestLog
-	err := r.db.First(&requestLog, id).Error
+	err := r.dbManager.GetDB().First(&requestLog, id).Error
 	if err != nil {
 		slog.Error("根据ID获取日志失败", "id", id, "error", err)
 		return nil, err
@@ -41,7 +39,7 @@ func (r *RequestLogRepository) GetByID(id uint) (*model.RequestLog, error) {
 // modelName 非空时按模型名过滤
 func (r *RequestLogRepository) GetRecent(limit int, modelName string) ([]model.RequestLog, error) {
 	var logs []model.RequestLog
-	q := r.db.Select("id, provider_id, model, input_tokens, output_tokens, total_tokens, cached_tokens, status, error_message, duration, created_at").
+	q := r.dbManager.GetDB().Select("id, provider_id, model, input_tokens, output_tokens, total_tokens, cached_tokens, status, error_message, duration, created_at").
 		Order("created_at desc")
 	if modelName != "" {
 		q = q.Where("model = ?", modelName)
@@ -93,7 +91,7 @@ func (r *RequestLogRepository) fillProviderInfoBatch(logs []model.RequestLog) {
 			ids = append(ids, id)
 		}
 		var providers []model.ProviderConfig
-		r.db.Where("id IN ?", ids).Find(&providers)
+		r.dbManager.GetDB().Where("id IN ?", ids).Find(&providers)
 		for _, p := range providers {
 			providerMap[p.ID] = p
 		}
@@ -110,7 +108,7 @@ func (r *RequestLogRepository) fillProviderInfo(log *model.RequestLog) {
 	providerMap := make(map[uint]model.ProviderConfig)
 	if log.ProviderID != model.DeletedProviderID {
 		var provider model.ProviderConfig
-		if err := r.db.First(&provider, log.ProviderID).Error; err == nil {
+		if err := r.dbManager.GetDB().First(&provider, log.ProviderID).Error; err == nil {
 			providerMap[log.ProviderID] = provider
 		}
 	}
@@ -137,7 +135,7 @@ func (r *RequestLogRepository) AggregateHour(hourStart time.Time) ([]model.Hourl
 	}
 
 	var results []AggResult
-	err := r.db.Model(&model.RequestLog{}).
+	err := r.dbManager.GetDB().Model(&model.RequestLog{}).
 		Select("provider_id, COALESCE(NULLIF(model, ''), 'unknown') as model, COALESCE(SUM(input_tokens), 0) as input_tokens, COALESCE(SUM(output_tokens), 0) as output_tokens, COALESCE(SUM(total_tokens), 0) as total_tokens, COALESCE(SUM(cached_tokens), 0) as cached_tokens, COUNT(*) as request_count, COALESCE(SUM(duration), 0) as total_duration").
 		Where("created_at >= ? AND created_at < ? AND aggregated = ? AND status = ?", hourStart, hourEnd, false, "success").
 		Group("provider_id, model").
@@ -208,7 +206,7 @@ func (r *RequestLogRepository) AggregateHour(hourStart time.Time) ([]model.Hourl
 // MarkAggregated 将指定小时范围内未汇总的记录标记为已汇总
 func (r *RequestLogRepository) MarkAggregated(hourStart time.Time) error {
 	hourEnd := hourStart.Add(time.Hour)
-	return r.db.Model(&model.RequestLog{}).
+	return r.dbManager.GetDB().Model(&model.RequestLog{}).
 		Where("created_at >= ? AND created_at < ? AND aggregated = ?", hourStart, hourEnd, false).
 		Update("aggregated", true).Error
 }
@@ -241,7 +239,7 @@ func (r *RequestLogRepository) GetCurrentHourStats(providerID uint, modelName st
 		args = append(args, modelName)
 	}
 
-	err := r.db.Raw(query, args...).Scan(&stats).Error
+	err := r.dbManager.GetDB().Raw(query, args...).Scan(&stats).Error
 	return &stats, err
 }
 
@@ -250,7 +248,7 @@ func (r *RequestLogRepository) GetCurrentHourHourlyStats(providerID uint) (*mode
 	hourStart := time.Now().Truncate(time.Hour)
 
 	var hourExpr string
-	if r.dbType == "sqlite" {
+	if r.dbManager.GetDBType() == "sqlite" {
 		hourExpr = "CAST(strftime('%H', created_at) AS INTEGER)"
 	} else {
 		hourExpr = "EXTRACT(HOUR FROM created_at)"
@@ -273,8 +271,9 @@ func (r *RequestLogRepository) GetCurrentHourHourlyStats(providerID uint) (*mode
 		query += " AND provider_id = ?"
 		args = append(args, providerID)
 	}
+	query += fmt.Sprintf(" GROUP BY %s", hourExpr)
 
-	err := r.db.Raw(query, args...).Scan(&result).Error
+	err := r.dbManager.GetDB().Raw(query, args...).Scan(&result).Error
 	return &result, err
 }
 
@@ -285,7 +284,7 @@ func (r *RequestLogRepository) GetHourlyStatsByDateFromLogs(date time.Time, prov
 	dayEnd := dayStart.Add(24 * time.Hour)
 
 	var hourExpr string
-	if r.dbType == "sqlite" {
+	if r.dbManager.GetDBType() == "sqlite" {
 		hourExpr = "CAST(strftime('%H', created_at) AS INTEGER)"
 	} else {
 		hourExpr = "EXTRACT(HOUR FROM created_at)"
@@ -313,14 +312,14 @@ func (r *RequestLogRepository) GetHourlyStatsByDateFromLogs(date time.Time, prov
 	`, hourExpr)
 
 	var results []model.HourlyStatsResult
-	err := r.db.Raw(query, args...).Scan(&results).Error
+	err := r.dbManager.GetDB().Raw(query, args...).Scan(&results).Error
 	return results, err
 }
 
 // GetMinCreatedAt 获取最早记录的创建时间（用于回填起始点）
 func (r *RequestLogRepository) GetMinCreatedAt() (*time.Time, error) {
 	var nullTime sql.NullTime
-	err := r.db.Model(&model.RequestLog{}).
+	err := r.dbManager.GetDB().Model(&model.RequestLog{}).
 		Select("MIN(created_at)").
 		Scan(&nullTime).Error
 	if err != nil {
@@ -338,7 +337,7 @@ func (r *RequestLogRepository) GetMinCreatedAt() (*time.Time, error) {
 // 确保只删除已确认汇总完成的记录，未汇总的记录不会被误删
 func (r *RequestLogRepository) DeleteOldRequestLogs(days int) (int64, error) {
 	cutoffDate := time.Now().Truncate(time.Hour).Add(-time.Hour).AddDate(0, 0, -days)
-	result := r.db.Where("created_at < ? AND aggregated = ?", cutoffDate, true).Delete(&model.RequestLog{})
+	result := r.dbManager.GetDB().Where("created_at < ? AND aggregated = ?", cutoffDate, true).Delete(&model.RequestLog{})
 	return result.RowsAffected, result.Error
 }
 
@@ -366,17 +365,19 @@ type ModelDailyStat struct {
 // GetHourlyModelStats 获取指定日期指定模型的分时统计（直接从 request_logs 查询）
 func (r *RequestLogRepository) GetHourlyModelStats(date time.Time, providerID uint, modelName string) ([]model.HourlyStatsResult, error) {
 	dayStart := date.Truncate(24 * time.Hour)
-	dayEnd := dayStart.Add(24 * time.Hour)
+	// 只查询已完成的小时（排除当前小时），当前小时由 service 层单独获取并合并
+	// 对于历史日期：currentHourStart() 远大于 dayEnd，效果等同于查询全天
+	upperBound := currentHourStart()
 
 	var hourExpr string
-	if r.dbType == "sqlite" {
+	if r.dbManager.GetDBType() == "sqlite" {
 		hourExpr = "CAST(strftime('%H', created_at) AS INTEGER)"
 	} else {
 		hourExpr = "EXTRACT(HOUR FROM created_at)"
 	}
 
 	var results []model.HourlyStatsResult
-	err := r.db.Raw(fmt.Sprintf(`SELECT
+	err := r.dbManager.GetDB().Raw(fmt.Sprintf(`SELECT
 		%s as hour,
 		COUNT(*) as request_count,
 		COALESCE(SUM(total_tokens), 0) as total_tokens,
@@ -390,7 +391,7 @@ func (r *RequestLogRepository) GetHourlyModelStats(date time.Time, providerID ui
 		AND model = ?
 	GROUP BY %s
 	ORDER BY hour
-	`, hourExpr, hourExpr), dayStart, dayEnd, providerID, modelName).Scan(&results).Error
+	`, hourExpr, hourExpr), dayStart, upperBound, providerID, modelName).Scan(&results).Error
 	return results, err
 }
 
@@ -420,7 +421,7 @@ func (r *RequestLogRepository) GetCurrentHourModelStats(providerID uint) ([]Mode
 	query += " GROUP BY provider_id, model"
 
 	var results []ModelDailyStat
-	err := r.db.Raw(query, args...).Scan(&results).Error
+	err := r.dbManager.GetDB().Raw(query, args...).Scan(&results).Error
 	if err != nil {
 		return nil, err
 	}
@@ -435,7 +436,7 @@ func (r *RequestLogRepository) GetCurrentHourModelStats(providerID uint) ([]Mode
 func (r *RequestLogRepository) GetCurrentHourBreakdown(providerID uint) ([]CurrentHourBreakdown, error) {
 	hourStart := time.Now().Truncate(time.Hour)
 
-	query := r.db.Model(&model.RequestLog{}).
+	query := r.dbManager.GetDB().Model(&model.RequestLog{}).
 		Select("provider_id, COALESCE(NULLIF(model, ''), 'unknown') as model, COALESCE(SUM(input_tokens), 0) as input_tokens, COALESCE(SUM(output_tokens), 0) as output_tokens, COALESCE(SUM(total_tokens), 0) as total_tokens").
 		Where("created_at >= ? AND status = 'success'", hourStart)
 	if providerID > 0 {
@@ -446,8 +447,3 @@ func (r *RequestLogRepository) GetCurrentHourBreakdown(providerID uint) ([]Curre
 		Scan(&results).Error
 	return results, err
 }
-
-
-
-
-

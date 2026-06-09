@@ -13,6 +13,8 @@ export {
 export {
     ActiveRequestVO,
     CodeBuddyResultVO,
+    DBTestParams,
+    DBTestResultVO,
     HourlyStatBreakdownVO,
     LogEntryVO,
     ModelStatVO,

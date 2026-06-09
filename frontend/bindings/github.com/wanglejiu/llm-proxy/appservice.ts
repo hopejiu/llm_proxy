@@ -22,6 +22,13 @@ import * as config$0 from "./internal/config/models.js";
 import * as $models from "./models.js";
 
 /**
+ * ApplyDBConfig 运行时切换数据库配置
+ */
+export function ApplyDBConfig(params: $models.DBTestParams): $CancellablePromise<void> {
+    return $Call.ByID(1298358398, params);
+}
+
+/**
  * EnvFileExists 检查 .env 文件是否存在
  */
 export function EnvFileExists(): $CancellablePromise<boolean> {
@@ -150,6 +157,15 @@ export function StopProxy(): $CancellablePromise<void> {
     return $Call.ByID(1140884718);
 }
 
+/**
+ * TestDBConnection 测试数据库连接参数
+ */
+export function TestDBConnection(params: $models.DBTestParams): $CancellablePromise<$models.DBTestResultVO> {
+    return $Call.ByID(626525936, params).then(($result: any) => {
+        return $$createType6($result);
+    });
+}
+
 // Private type creation functions
 const $$createType0 = config$0.EnvItem.createFrom;
 const $$createType1 = $Create.Array($$createType0);
@@ -157,3 +173,4 @@ const $$createType2 = $models.LogEntryVO.createFrom;
 const $$createType3 = $Create.Array($$createType2);
 const $$createType4 = $models.ProxyStatusVO.createFrom;
 const $$createType5 = $Create.Map($Create.Any, $Create.Any);
+const $$createType6 = $models.DBTestResultVO.createFrom;

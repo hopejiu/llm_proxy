@@ -4,19 +4,20 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wanglejiu/llm-proxy/internal/config"
 	"github.com/wanglejiu/llm-proxy/internal/handler"
 	"github.com/wanglejiu/llm-proxy/internal/logger"
 	"github.com/wanglejiu/llm-proxy/internal/model"
 	"github.com/wanglejiu/llm-proxy/internal/repository"
 	"github.com/wanglejiu/llm-proxy/internal/service"
-	"github.com/wailsapp/wails/v3/pkg/application"
-	"github.com/wailsapp/wails/v3/pkg/events"
-	"log/slog"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
 
 	sqlite "github.com/glebarez/sqlite"
 	"golang.org/x/sys/windows"
@@ -72,10 +73,13 @@ func main() {
 	// 初始化数据库
 	db, dbFallbackMsg := initDB(cfg)
 
+	// 创建 DBManager
+	dbManager := repository.NewDBManager(db, cfg.DBType)
+
 	// 组装依赖
-	providerRepo := repository.NewProviderRepository(db)
-	requestLogRepo := repository.NewRequestLogRepository(db, cfg.DBType)
-	hourlyStatRepo := repository.NewHourlyStatRepository(db, cfg.DBType)
+	providerRepo := repository.NewProviderRepository(dbManager)
+	requestLogRepo := repository.NewRequestLogRepository(dbManager)
+	hourlyStatRepo := repository.NewHourlyStatRepository(dbManager)
 
 	// 启动时清理旧数据
 	cleanOldData(requestLogRepo, cfg.LogCleanupDays, dataDir)
@@ -103,7 +107,7 @@ func main() {
 	// 创建 Wails 3 绑定服务
 	providerBindingService := NewProviderService(providerSvc, cfg, proxyService)
 	statsBindingService := NewStatsService(statsSvc, logSvc, providerSvc, tracker)
-	appBindingService := NewAppService(cfg, proxyHandler, anthropicHandler, ollamaHandler, logReader, dbFallbackMsg)
+	appBindingService := NewAppService(cfg, dbManager, proxyHandler, anthropicHandler, ollamaHandler, logReader, dbFallbackMsg)
 	cleanupWrapper := NewCleanupServiceWrapper(cleanupSvc)
 
 	slog.Info("正在启动 Wails 窗口...")
@@ -307,7 +311,7 @@ func migrateDB(db *gorm.DB, cfg *config.Config) {
 
 	migrateHourlyStats(db, cfg)
 	migrateProviderConfigs(db, cfg)
-	createIndexesIfNotExist(db, cfg)
+	createIndexesIfNotExist(db)
 	slog.Info("数据库表初始化完成")
 }
 
@@ -365,15 +369,19 @@ func createSQLiteTablesIfNotExist(db *gorm.DB) {
 	}
 }
 
-func createIndexesIfNotExist(db *gorm.DB, cfg *config.Config) {
-	indexes := []string{
-		"CREATE INDEX IF NOT EXISTS idx_request_logs_created_at_status ON request_logs(created_at, status)",
-		"CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON request_logs(created_at)",
-		"CREATE INDEX IF NOT EXISTS idx_request_logs_provider_id ON request_logs(provider_id)",
+func createIndexesIfNotExist(db *gorm.DB) {
+	migrator := db.Migrator()
+	indexNames := []string{
+		"idx_created_at_status",
+		"idx_created_at",
+		"idx_provider_id",
 	}
-	for _, idx := range indexes {
-		if err := db.Exec(idx).Error; err != nil {
-			slog.Warn("创建索引失败", "sql", idx, "error", err)
+	for _, name := range indexNames {
+		if migrator.HasIndex(&model.RequestLog{}, name) {
+			continue
+		}
+		if err := migrator.CreateIndex(&model.RequestLog{}, name); err != nil {
+			slog.Warn("创建索引失败", "index", name, "error", err)
 		}
 	}
 }
@@ -486,22 +494,33 @@ func checkOldProviderColumnsExist(db *gorm.DB, cfg *config.Config) bool {
 	return count > 0
 }
 
-// dropOldProviderColumns 删除旧的 model/alias/extra_params 列
+// dropOldProviderColumns 删除旧的 model/alias/extra_params 列（先检查是否存在再 DROP）
 func dropOldProviderColumns(db *gorm.DB, cfg *config.Config) {
 	for _, col := range []string{"model", "alias", "extra_params"} {
+		var exists bool
 		if cfg.IsSQLite() {
-			if err := db.Exec("ALTER TABLE provider_configs DROP COLUMN " + col).Error; err != nil {
-				// SQLite 中列可能已不存在
-				slog.Debug("删除旧列失败（可能已不存在）", "column", col, "error", err)
-			} else {
-				slog.Info("已删除旧列", "column", col)
+			var cols []string
+			db.Raw("PRAGMA table_info(provider_configs)").Pluck("name", &cols)
+			for _, c := range cols {
+				if c == col {
+					exists = true
+					break
+				}
 			}
 		} else {
-			if err := db.Exec("ALTER TABLE provider_configs DROP COLUMN " + col).Error; err != nil {
-				slog.Debug("删除旧列失败（可能已不存在）", "column", col, "error", err)
-			} else {
-				slog.Info("已删除旧列", "column", col)
-			}
+			var count int64
+			db.Raw(`SELECT COUNT(*) FROM information_schema.COLUMNS
+				WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'provider_configs'
+				AND COLUMN_NAME = ?`, col).Scan(&count)
+			exists = count > 0
+		}
+		if !exists {
+			continue
+		}
+		if err := db.Exec("ALTER TABLE provider_configs DROP COLUMN " + col).Error; err != nil {
+			slog.Warn("删除旧列失败", "column", col, "error", err)
+		} else {
+			slog.Info("已删除旧列", "column", col)
 		}
 	}
 }

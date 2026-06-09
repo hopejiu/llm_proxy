@@ -40,4 +40,7 @@ export const AppAPI = {
   logInfo: (msg: string) => AppService.LogInfo(msg).catch(() => {}),
   logWarn: (msg: string) => AppService.LogWarn(msg).catch(() => {}),
   logError: (msg: string) => AppService.LogError(msg).catch(() => {}),
+  // 数据库热切换（需要执行 wails generate bindings 或 wails build 后可用）
+  testDBConnection: (params: any) => AppService.TestDBConnection(params),
+  applyDBConfig: (params: any) => AppService.ApplyDBConfig(params),
 };

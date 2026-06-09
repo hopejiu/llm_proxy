@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { ProviderAPI } from "../services";
+import logger from "../lib/logger";
 
 interface ProviderVO {
   id: number;
@@ -25,6 +26,7 @@ export function useProviders() {
       const data = await ProviderAPI.getProviders();
       setProviders(data);
     } catch (e: any) {
+      logger.error("加载 Provider 列表失败", { error: e?.message || String(e) });
       setError(e?.message || "Failed to load providers");
     } finally {
       setLoading(false);

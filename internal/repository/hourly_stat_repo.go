@@ -11,18 +11,17 @@ import (
 
 // HourlyStatRepository 汇总表数据访问
 type HourlyStatRepository struct {
-	db     *gorm.DB
-	dbType string
+	dbManager *DBManager
 }
 
-func NewHourlyStatRepository(db *gorm.DB, dbType string) *HourlyStatRepository {
-	return &HourlyStatRepository{db: db, dbType: dbType}
+func NewHourlyStatRepository(dbManager *DBManager) *HourlyStatRepository {
+	return &HourlyStatRepository{dbManager: dbManager}
 }
 
 // Upsert 插入或累加更新汇总记录（原子操作）
 // 行级 aggregated 标记保证同一条明细不会被重复汇总，此处累加是安全的
 func (r *HourlyStatRepository) Upsert(stat *model.HourlyStat) error {
-	if r.dbType == "sqlite" {
+	if r.dbManager.GetDBType() == "sqlite" {
 		return r.upsertSQLite(stat)
 	}
 	return r.upsertMySQL(stat)
@@ -31,14 +30,14 @@ func (r *HourlyStatRepository) Upsert(stat *model.HourlyStat) error {
 // upsertSQLite 使用 SQLite 的 INSERT OR REPLACE 原子操作
 func (r *HourlyStatRepository) upsertSQLite(stat *model.HourlyStat) error {
 	var existing model.HourlyStat
-	result := r.db.Where("hour = ? AND provider_id = ? AND model = ?", stat.Hour, stat.ProviderID, stat.Model).First(&existing)
+	result := r.dbManager.GetDB().Where("hour = ? AND provider_id = ? AND model = ?", stat.Hour, stat.ProviderID, stat.Model).First(&existing)
 	if result.Error == gorm.ErrRecordNotFound {
-		return r.db.Create(stat).Error
+		return r.dbManager.GetDB().Create(stat).Error
 	}
 	if result.Error != nil {
 		return result.Error
 	}
-	return r.db.Model(&model.HourlyStat{}).
+	return r.dbManager.GetDB().Model(&model.HourlyStat{}).
 		Where("hour = ? AND provider_id = ? AND model = ?", stat.Hour, stat.ProviderID, stat.Model).
 		Updates(map[string]interface{}{
 			"input_tokens":   gorm.Expr("input_tokens + ?", stat.InputTokens),
@@ -53,7 +52,7 @@ func (r *HourlyStatRepository) upsertSQLite(stat *model.HourlyStat) error {
 // upsertMySQL 使用 MySQL 的 ON DUPLICATE KEY UPDATE 原子操作
 func (r *HourlyStatRepository) upsertMySQL(stat *model.HourlyStat) error {
 	now := time.Now()
-	return r.db.Exec(`
+	return r.dbManager.GetDB().Exec(`
 		INSERT INTO hourly_stats (hour, provider_id, model, input_tokens, output_tokens, total_tokens, cached_tokens, request_count, total_duration, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE
@@ -70,7 +69,7 @@ func (r *HourlyStatRepository) upsertMySQL(stat *model.HourlyStat) error {
 // GetByHourRange 获取指定时间范围内的汇总记录
 func (r *HourlyStatRepository) GetByHourRange(start, end time.Time) ([]model.HourlyStat, error) {
 	var stats []model.HourlyStat
-	err := r.db.Where("hour >= ? AND hour < ?", start, end).
+	err := r.dbManager.GetDB().Where("hour >= ? AND hour < ?", start, end).
 		Order("hour asc").
 		Find(&stats).Error
 	return stats, err
@@ -88,7 +87,7 @@ func (r *HourlyStatRepository) GetDashboardStats(providerID uint) (todayStats, w
 
 	// 一次查询获取所有汇总数据（model='' 表示 provider 级别合计），在内存中分桶
 	var stats []model.HourlyStat
-	if err = r.db.Where("hour < ? AND provider_id = ? AND model = ''", currentHourStart(), providerID).Find(&stats).Error; err != nil {
+	if err = r.dbManager.GetDB().Where("hour < ? AND provider_id = ? AND model = ''", currentHourStart(), providerID).Find(&stats).Error; err != nil {
 		return
 	}
 
@@ -130,7 +129,7 @@ func (r *HourlyStatRepository) GetDashboardStats(providerID uint) (todayStats, w
 func (r *HourlyStatRepository) GetDailyStats(days int, providerID uint) ([]model.TokenStats, error) {
 	startDate := time.Now().AddDate(0, 0, -days)
 	var stats []model.HourlyStat
-	if err := r.db.Where("hour >= ? AND provider_id = ? AND model = ''", startDate.Truncate(24*time.Hour), providerID).Find(&stats).Error; err != nil {
+	if err := r.dbManager.GetDB().Where("hour >= ? AND provider_id = ? AND model = ''", startDate.Truncate(24*time.Hour), providerID).Find(&stats).Error; err != nil {
 		return nil, err
 	}
 
@@ -164,7 +163,7 @@ func (r *HourlyStatRepository) GetDailyStats(days int, providerID uint) ([]model
 func (r *HourlyStatRepository) GetTodayHourlyStats(providerID uint) ([]model.HourlyStatsResult, error) {
 	today := time.Now().Truncate(24 * time.Hour)
 	var stats []model.HourlyStat
-	if err := r.db.Where("hour >= ? AND hour < ? AND provider_id = ? AND model = ''", today, currentHourStart(), providerID).Find(&stats).Error; err != nil {
+	if err := r.dbManager.GetDB().Where("hour >= ? AND hour < ? AND provider_id = ? AND model = ''", today, currentHourStart(), providerID).Find(&stats).Error; err != nil {
 		return nil, err
 	}
 
@@ -194,10 +193,10 @@ func (r *HourlyStatRepository) GetHourlyStatsByDate(date time.Time, providerID u
 
 	if isToday {
 		// 今日：汇总表已完成小时
-		err = r.db.Where("hour >= ? AND hour < ? AND provider_id = ? AND model = ''", dayStart, currentHourStart(), providerID).Find(&stats).Error
+		err = r.dbManager.GetDB().Where("hour >= ? AND hour < ? AND provider_id = ? AND model = ''", dayStart, currentHourStart(), providerID).Find(&stats).Error
 	} else {
 		// 历史日期：汇总表全天
-		err = r.db.Where("hour >= ? AND hour < ? AND provider_id = ? AND model = ''", dayStart, dayEnd, providerID).Find(&stats).Error
+		err = r.dbManager.GetDB().Where("hour >= ? AND hour < ? AND provider_id = ? AND model = ''", dayStart, dayEnd, providerID).Find(&stats).Error
 	}
 	if err != nil {
 		return nil, err
@@ -220,7 +219,7 @@ func (r *HourlyStatRepository) GetHourlyStatsByDate(date time.Time, providerID u
 // GetMissingHours 获取指定范围内缺失全局汇总行(provider_id=0, model='')的小时列表
 func (r *HourlyStatRepository) GetMissingHours(start, end time.Time) ([]time.Time, error) {
 	var existingHours []time.Time
-	if err := r.db.Model(&model.HourlyStat{}).
+	if err := r.dbManager.GetDB().Model(&model.HourlyStat{}).
 		Where("hour >= ? AND hour < ? AND provider_id = 0 AND model = ''", start, end).
 		Pluck("hour", &existingHours).Error; err != nil {
 		return nil, err
@@ -249,7 +248,7 @@ func (r *HourlyStatRepository) GetMissingProviderHours(start, end time.Time) ([]
 		ProviderID uint
 	}
 	var existing []HourProvider
-	if err := r.db.Model(&model.HourlyStat{}).
+	if err := r.dbManager.GetDB().Model(&model.HourlyStat{}).
 		Select("hour, provider_id").
 		Where("hour >= ? AND hour < ? AND provider_id > 0 AND model = ''", start, end).
 		Find(&existing).Error; err != nil {
@@ -264,7 +263,7 @@ func (r *HourlyStatRepository) GetMissingProviderHours(start, end time.Time) ([]
 
 	// 获取所有活跃 provider ID
 	var providerIDs []uint
-	if err := r.db.Model(&model.HourlyStat{}).
+	if err := r.dbManager.GetDB().Model(&model.HourlyStat{}).
 		Where("hour >= ? AND hour < ? AND provider_id > 0", start, end).
 		Distinct("provider_id").
 		Pluck("provider_id", &providerIDs).Error; err != nil {
@@ -294,7 +293,7 @@ func (r *HourlyStatRepository) GetMissingProviderHours(start, end time.Time) ([]
 // 用于与 request_logs 的当前小时数据合并，实现混合查询
 func (r *HourlyStatRepository) GetModelDailyStats(providerID uint) ([]ModelDailyStatResult, error) {
 	var dateExpr string
-	if r.dbType == "sqlite" {
+	if r.dbManager.GetDBType() == "sqlite" {
 		// SQLite 的 time.Time 存储为 ISO 8601（如 2026-06-09T00:00:00+08:00）
 		// strftime 可正确处理带时区的格式，返回 YYYY-MM-DD
 		dateExpr = "strftime('%Y-%m-%d', hour)"
@@ -323,7 +322,7 @@ func (r *HourlyStatRepository) GetModelDailyStats(providerID uint) ([]ModelDaily
 	query += " GROUP BY date, provider_id, model ORDER BY date DESC, total_tokens DESC"
 
 	var results []ModelDailyStatResult
-	err := r.db.Raw(query, args...).Scan(&results).Error
+	err := r.dbManager.GetDB().Raw(query, args...).Scan(&results).Error
 	if err != nil {
 		return nil, err
 	}
@@ -349,7 +348,7 @@ type ModelDailyStatResult struct {
 // providerID=0 时返回所有 provider 的数据，providerID>0 时只返回指定 provider 的数据
 func (r *HourlyStatRepository) GetHourlyStatsWithBreakdown(start, end time.Time, providerID uint) ([]model.HourlyStat, error) {
 	var stats []model.HourlyStat
-	query := r.db.Where("hour >= ? AND hour < ? AND provider_id > 0 AND model <> ''", start, end)
+	query := r.dbManager.GetDB().Where("hour >= ? AND hour < ? AND provider_id > 0 AND model <> ''", start, end)
 	if providerID > 0 {
 		query = query.Where("provider_id = ?", providerID)
 	}
@@ -364,7 +363,7 @@ func (r *HourlyStatRepository) GetHourlyModelStatsFromSummary(date time.Time, pr
 	dayEnd := dayStart.Add(24 * time.Hour)
 
 	var results []model.HourlyStatsResult
-	err := r.db.Model(&model.HourlyStat{}).
+	err := r.dbManager.GetDB().Model(&model.HourlyStat{}).
 		Select("HOUR(hour) as hour, SUM(request_count) as request_count, SUM(total_tokens) as total_tokens, SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens, SUM(cached_tokens) as cached_tokens").
 		Where("hour >= ? AND hour < ? AND provider_id = ? AND model = ?", dayStart, dayEnd, providerID, modelName).
 		Group("HOUR(hour)").

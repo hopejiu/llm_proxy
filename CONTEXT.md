@@ -36,6 +36,14 @@ _避免_: 绑定层, bound struct, frontend API
 
 - **"服务" (Service)**: 在 `internal/service/` 中指业务逻辑层（如 ProviderService、StatsService）；在 Wails 绑定层中指注册到 `application.NewService()` 的结构体。前者是纯 Go 业务逻辑，后者是前端可调用的 API 门面。后续讨论中需加前缀区分：**业务服务** vs **绑定服务**。
 
+**DBManager**:
+运行时数据库连接管理器，持有 `*gorm.DB` 和 `dbType`，所有 Repository 通过 `GetDB()` / `GetDBType()` 获取连接。支持运行时 `Replace(newDB, newDBType)` 热切换数据库，旧连接在指定延迟后自动关闭。
+_避免_: 直接传递 `*gorm.DB`，DB helper，连接池
+
+**连接测试 (Connection Test)**:
+在应用数据库配置变更前，临时创建一个数据库连接并执行 Ping 操作，验证参数可用性（数据库是否存在、能否连通）。测试通过后才允许「应用配置」。
+_避免_: 直接应用不验证
+
 ## 示例对话
 
 **开发者**: "用户添加了一个新的 Provider，绑定服务应该调用业务服务创建记录，然后刷新前端表格。"

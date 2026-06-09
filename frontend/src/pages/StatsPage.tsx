@@ -10,6 +10,7 @@ import { useLocalStorage } from "../hooks/useLocalStorage";
 import Skeleton from "../components/Skeleton";
 import RecentRequestsTable from "../components/RecentRequestsTable";
 import { fmtYuan, buildPricingMap, computeModelCost, computeCostBreakdown, lookupLogPrices } from "../utils/cost";
+import logger from "../lib/logger";
 
 echarts.use([BarChart, LineChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer]);
 
@@ -137,16 +138,21 @@ export default function StatsPage() {
   const pricingMap = useMemo(() => buildPricingMap(providers), [providers]);
 
   // Filter modelStats by selected period + model
+  // 规范化日期: 后端 DATE() 经 Go string 返回可能是 "2026-06-09T00:00:00+08:00"，统一截取前 10 位
   const filteredModelStats = useMemo(() => {
     const todayStr = fd(new Date());
     const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
     const weekStr = fd(weekAgo);
+    if (modelStats.length > 0) {
+      logger.debug("modelStats 原始日期", { sample: modelStats[0]?.date, count: modelStats.length, todayStr });
+    }
     return modelStats.filter((ms: any) => {
-      if (period === "today" && ms.date !== todayStr) return false;
-      if (period === "week" && ms.date < weekStr) return false;
+      const d = ds(ms.date);
+      if (period === "today" && d !== todayStr) return false;
+      if (period === "week" && d < weekStr) return false;
       if (modelFilter && ms.model !== modelFilter) return false;
       return true;
-    });
+    }).map((ms: any) => ({ ...ms, date: ds(ms.date) }));
   }, [modelStats, period, modelFilter]);
 
   // Compute costs from filteredModelStats + pricingMap
@@ -206,12 +212,16 @@ export default function StatsPage() {
     }), [recent, pricingMap, modelFilter]);
 
   const fetchHourly = useCallback(async (date: string, pid: number) => {
-    if (modelFilter) {
-      const h = await StatsAPI.getHourlyModelStats(date, pid, modelFilter);
-      setHourly(h||[]);
-    } else {
-      const h = await StatsAPI.getHourlyStatsByDate(date, pid);
-      setHourly(h||[]);
+    try {
+      if (modelFilter) {
+        const h = await StatsAPI.getHourlyModelStats(date, pid, modelFilter);
+        setHourly(h||[]);
+      } else {
+        const h = await StatsAPI.getHourlyStatsByDate(date, pid);
+        setHourly(h||[]);
+      }
+    } catch (e: any) {
+      logger.error("加载分时统计失败", { date, pid, modelFilter, error: e?.message || String(e) });
     }
   }, [modelFilter]);
 
@@ -225,6 +235,7 @@ export default function StatsPage() {
           StatsAPI.getRecentLogs(20, modelFilter),
           StatsAPI.getHourlyModelStats(hDate, sp, modelFilter),
         ]);
+        logger.info("模型筛选模式加载", { sp, modelFilter, msCount: ms?.length, recentCount: r?.length, hourlyCount: h?.length });
         setModelStats(ms||[]); setRecent(r||[]); setHourly(h||[]);
         setData(null); setDaily([]);
       } else {
@@ -235,12 +246,14 @@ export default function StatsPage() {
           StatsAPI.getRecentLogs(20),
           StatsAPI.getModelStats(sp),
         ]);
+        logger.info("Provider模式加载", { sp, msCount: ms?.length, dailyCount: d?.length,
+          todayTokens: s?.today?.total_tokens, weekTokens: s?.week?.total_tokens });
         setData(s); setDaily(d||[]); setRecent(r||[]);
         setModelStats(ms||[]);
       }
       setUpdateTime(new Date().toLocaleTimeString());
       fetchHourly(hDate, sp);
-    } catch {} finally { setRefreshing(false); setLoading(false); }
+    } catch (e: any) { logger.error("加载统计数据失败", { error: e?.message || String(e) }); } finally { setRefreshing(false); setLoading(false); }
   }, [sp, hDate, fetchHourly, modelFilter]);
 
   useEffect(()=>{setLoading(true);fetchAll()},[fetchAll]);
@@ -248,12 +261,8 @@ export default function StatsPage() {
   useEffect(()=>{function h(e:MouseEvent){if(ddRef.current&&!ddRef.current.contains(e.target as Node))setShowDD(false)}document.addEventListener("click",h);return()=>document.removeEventListener("click",h)},[]);
   useEffect(()=>{if(!stacked){setBd([]);return}StatsAPI.getHourlyStatsByDateWithBreakdown(hDate, sp).then((d:any)=>setBd(d||[])).catch(()=>setBd([]))},[hDate,sp,stacked]);
 
-  const tt = data?.today?.total_tokens||0;
-  const yt = (()=>{const y=new Date();y.setDate(y.getDate()-1);const ys=fd(y);return daily.find((s:any)=>ds(s.date)===ys)?.total_tokens||0;})();
-  const wt = data?.week?.total_tokens||0;
-  const lwt = (()=>{const t=new Date();let tot=0;for(let i=7;i<14;i++){const d=new Date(t);d.setDate(d.getDate()-i);tot+=daily.find((s:any)=>ds(s.date)===fd(d))?.total_tokens||0;}return tot;})();
-
   // When modelFilter is set, compute overview cards from filteredModelStats
+  const emptyAgg = () => ({ total_input_tokens: 0, total_output_tokens: 0, total_cached_tokens: 0, total_tokens: 0, request_count: 0 });
   const modelOverview = useMemo(() => {
     if (!modelFilter) return null;
     const todayStr = fd(new Date());
@@ -265,13 +274,20 @@ export default function StatsPage() {
       total_cached_tokens: (s.total_cached_tokens || 0) + ms.total_cached_tokens,
       total_tokens: (s.total_tokens || 0) + ms.total_tokens,
       request_count: (s.request_count || 0) + ms.request_count,
-    }), {});
+    }), emptyAgg());
     return {
       today: agg(filteredModelStats.filter((ms: any) => ms.date === todayStr)),
       week: agg(filteredModelStats.filter((ms: any) => ms.date >= weekStr)),
       total: agg(filteredModelStats),
     };
   }, [modelFilter, filteredModelStats]);
+
+  // Trend values: use modelOverview when filter is active, otherwise use provider-level data
+  const overview = modelOverview || { today: data?.today, week: data?.week, total: data?.total };
+  const tt = overview?.today?.total_tokens || 0;
+  const yt = (()=>{const y=new Date();y.setDate(y.getDate()-1);const ys=fd(y);return (modelFilter ? filteredModelStats.filter((ms:any)=>ms.date===ys).reduce((s:number,ms:any)=>s+ms.total_tokens,0) : daily.find((s:any)=>ds(s.date)===ys)?.total_tokens)||0;})();
+  const wt = overview?.week?.total_tokens || 0;
+  const lwt = (()=>{const t=new Date();if(modelFilter){let tot=0;for(let i=7;i<14;i++){const d=new Date(t);d.setDate(d.getDate()-i);tot+=filteredModelStats.filter((ms:any)=>ms.date===fd(d)).reduce((s:number,ms:any)=>s+ms.total_tokens,0);}return tot;}let tot=0;for(let i=7;i<14;i++){const d=new Date(t);d.setDate(d.getDate()-i);tot+=daily.find((s:any)=>ds(s.date)===fd(d))?.total_tokens||0;}return tot;})();
 
   // Daily data: provider-level from API, or model-level from filteredModelStats
   const dailyWithCost = useMemo(() => {

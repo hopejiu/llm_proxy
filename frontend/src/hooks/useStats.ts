@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { StatsAPI } from "../services";
+import logger from "../lib/logger";
 
 export function useStats(providerID: number = 0) {
   const [stats, setStats] = useState<any>(null);
@@ -13,6 +14,7 @@ export function useStats(providerID: number = 0) {
       const data = await StatsAPI.getStats(providerID);
       setStats(data);
     } catch (e: any) {
+      logger.error("加载统计概览失败", { providerID, error: e?.message || String(e) });
       setError(e?.message || "Failed to load stats");
     } finally {
       setLoading(false);
@@ -35,7 +37,8 @@ export function useDailyStats(providerID: number = 0) {
     try {
       const data = await StatsAPI.getDailyStats(providerID);
       setDailyStats(data);
-    } catch {
+    } catch (e: any) {
+      logger.warn("加载每日统计失败", { providerID, error: e?.message || String(e) });
       // ignore
     } finally {
       setLoading(false);

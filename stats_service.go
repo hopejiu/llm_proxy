@@ -121,6 +121,11 @@ func (s *StatsService) GetModelStats(providerID uint) ([]ModelStatVO, error) {
 			RequestCount:      item.RequestCount,
 		}
 	}
+	if len(result) > 0 {
+		slog.Debug("[GetModelStats] 返回数据", "providerID", providerID, "count", len(result),
+			"sample_date", result[0].Date, "sample_date_len", len(result[0].Date),
+			"sample_model", result[0].Model, "sample_tokens", result[0].TotalTokens)
+	}
 	return result, nil
 }
 

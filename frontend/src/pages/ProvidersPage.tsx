@@ -7,6 +7,7 @@ import ErrorBanner from "../components/ErrorBanner";
 import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { useHotkey } from "../hooks/useHotkey";
+import logger from "../lib/logger";
 
 /* ---------- types ---------- */
 
@@ -39,7 +40,7 @@ const emptyModel = (): ModelEntry => ({ name: "", aliases: [], extra_params: "",
 
 const emptyForm: ProviderForm = {
   name: "", base_url: "", api_key: "",
-  auto_suffix: false, url_suffix: "",
+  auto_suffix: false, url_suffix: "v1/chat/completions",
   models: [],
 };
 
@@ -78,6 +79,7 @@ function TagInput({
   placeholder?: string;
 }) {
   const [input, setInput] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const addTag = () => {
     const val = input.trim();
@@ -104,7 +106,7 @@ function TagInput({
   return (
     <div
       className="flex flex-wrap gap-1 items-center px-2 py-1.5 border border-[#EDE9FE] rounded-lg bg-white min-h-[36px] cursor-text focus-within:ring-2 focus-within:ring-brand-600/20 focus-within:border-brand-600/40 transition-all"
-      onClick={() => document.getElementById(`tag-input-${Math.random()}`)?.focus()}
+      onClick={() => inputRef.current?.focus()}
     >
       {tags.map((t, i) => (
         <span
@@ -123,6 +125,7 @@ function TagInput({
         </span>
       ))}
       <input
+        ref={inputRef}
         type="text"
         value={input}
         onChange={(e) => setInput(e.target.value)}
@@ -452,7 +455,10 @@ export default function ProvidersPage() {
     const e = validate(formWithClean);
     setErrors(e);
     setTouched(new Set(Object.keys(e)));
-    if (Object.keys(e).length > 0) return;
+    if (Object.keys(e).length > 0) {
+      logger.warn("Provider 保存中止：校验未通过", { errors: e });
+      return;
+    }
 
     setSaving(true);
     setActionError(null);
@@ -462,15 +468,25 @@ export default function ProvidersPage() {
         models: serializeModels(cleaned),
       };
       if (editingId) {
+        logger.info("更新 Provider", { id: editingId, name: form.name, modelsCount: cleaned.length });
         await ProviderAPI.updateProvider(editingId, payload);
+        logger.info("Provider 更新成功", { id: editingId });
         toast("success", "Provider 已更新");
       } else {
+        logger.info("创建 Provider", { name: form.name, modelsCount: cleaned.length });
         await ProviderAPI.createProvider(payload);
+        logger.info("Provider 创建成功", { name: form.name });
         toast("success", "Provider 已创建");
       }
       setDialogOpen(false);
       refresh();
     } catch (err: any) {
+      logger.error("Provider 保存失败", {
+        editingId,
+        name: form.name,
+        modelsCount: cleaned.length,
+        error: err?.message || String(err),
+      });
       setActionError("保存失败: " + (err?.message || "未知错误"));
     } finally {
       setSaving(false);
@@ -479,11 +495,14 @@ export default function ProvidersPage() {
 
   const handleDelete = useCallback(async () => {
     if (deleteTarget == null) return;
+    logger.info("删除 Provider", { id: deleteTarget });
     try {
       await ProviderAPI.deleteProvider(deleteTarget);
+      logger.info("Provider 删除成功", { id: deleteTarget });
       toast("success", "Provider 已删除");
       refresh();
     } catch (e: any) {
+      logger.error("Provider 删除失败", { id: deleteTarget, error: e?.message || String(e) });
       setActionError("删除失败: " + (e?.message || "未知错误"));
     } finally {
       setDeleteTarget(null);
@@ -661,16 +680,22 @@ export default function ProvidersPage() {
           ))}
 
           {/* Auto suffix checkbox */}
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              id="auto_suffix"
-              checked={form.auto_suffix}
-              onChange={(e) => handleFieldChange("auto_suffix", e.target.checked)}
-              className="w-4 h-4 rounded border-[#EDE9FE] text-brand-600 focus:ring-brand-600/20"
-            />
-            <label htmlFor="auto_suffix" className="text-sm text-[#6B6580] cursor-pointer">自动添加 URL 后缀</label>
-          </label>
+          <div>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                id="auto_suffix"
+                checked={form.auto_suffix}
+                onChange={(e) => handleFieldChange("auto_suffix", e.target.checked)}
+                className="w-4 h-4 rounded border-[#EDE9FE] text-brand-600 focus:ring-brand-600/20"
+              />
+              <label htmlFor="auto_suffix" className="text-sm text-[#6B6580] cursor-pointer">自动添加 URL 后缀</label>
+            </label>
+            <p className="form-helper mt-1">
+              开启后，请求时将自动在 Base URL 后拼接下方 URL 后缀（如 <code className="text-brand-600 bg-brand-50 px-1 rounded">v1/chat/completions</code>）；
+              关闭则直接使用 Base URL 作为请求地址，不再追加后缀。
+            </p>
+          </div>
 
           {/* Models section */}
           <div>

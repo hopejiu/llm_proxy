@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useCallback, type ReactNode } from "react";
 
 interface ModalProps {
   open: boolean;
@@ -11,14 +11,19 @@ interface ModalProps {
 
 export default function Modal({ open, onClose, title, children, footer, className = "" }: ModalProps) {
   const contentRef = useRef<HTMLDivElement>(null);
+  // 用 ref 保存最新的 onClose，避免 useEffect 因 onClose 引用变化而重复执行
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  const stableOnClose = useCallback(() => onCloseRef.current(), []);
 
   useEffect(() => {
     if (!open) return;
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") stableOnClose(); };
     globalThis.addEventListener("keydown", handler);
     contentRef.current?.focus();
     return () => globalThis.removeEventListener("keydown", handler);
-  }, [open, onClose]);
+  }, [open, stableOnClose]);
 
   if (!open) return null;
   return (

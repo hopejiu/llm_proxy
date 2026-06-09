@@ -94,12 +94,20 @@ func (c *Config) HotUpdate() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	c.DBType = getFromMap(envMap, "DB_TYPE", "mysql")
+	c.DBPath = getFromMap(envMap, "DB_PATH", "llm_proxy.db")
+	c.DBHost = getFromMap(envMap, "DB_HOST", "localhost")
+	c.DBPort = getFromMap(envMap, "DB_PORT", "3306")
+	c.DBUser = getFromMap(envMap, "DB_USER", "root")
+	c.DBPassword = getFromMap(envMap, "DB_PASSWORD", "")
+	c.DBName = getFromMap(envMap, "DB_NAME", "llm_proxy")
 	c.ProxyPort = getFromMap(envMap, "PROXY_PORT", "8888")
 	c.StreamMaxRetries = getIntFromMap(envMap, "STREAM_MAX_RETRIES", 10)
 	c.RetryDelayBase = getDurationFromMap(envMap, "RETRY_DELAY_BASE", 500*time.Millisecond)
 	c.ProviderCacheTTL = getDurationFromMap(envMap, "PROVIDER_CACHE_TTL", 30*time.Second)
 	c.LogCleanupDays = getIntFromMap(envMap, "LOG_CLEANUP_DAYS", 3)
 	c.LogLevel = getFromMap(envMap, "LOG_LEVEL", "info")
+	c.AutoStartProxy = getBoolFromMap(envMap, "AUTO_START_PROXY", true)
 }
 
 // loadEnvFileMap 从 .env 文件读取所有键值对
@@ -137,6 +145,16 @@ func getIntFromMap(m map[string]string, key string, defaultValue int) int {
 	if v, ok := m[key]; ok && v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
+		}
+	}
+	return defaultValue
+}
+
+// getBoolFromMap 从 map 中获取布尔值，不存在或无效则返回默认值
+func getBoolFromMap(m map[string]string, key string, defaultValue bool) bool {
+	if v, ok := m[key]; ok && v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
 		}
 	}
 	return defaultValue

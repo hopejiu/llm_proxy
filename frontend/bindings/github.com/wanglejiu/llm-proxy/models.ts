@@ -53,6 +53,82 @@ export class CodeBuddyResultVO {
 }
 
 /**
+ * DBTestParams 数据库测试/应用参数
+ */
+export class DBTestParams {
+    "db_type": string;
+    "db_host": string;
+    "db_port": string;
+    "db_user": string;
+    "db_pass": string;
+    "db_name": string;
+    "db_path": string;
+
+    /** Creates a new DBTestParams instance. */
+    constructor($$source: Partial<DBTestParams> = {}) {
+        if (!("db_type" in $$source)) {
+            this["db_type"] = "";
+        }
+        if (!("db_host" in $$source)) {
+            this["db_host"] = "";
+        }
+        if (!("db_port" in $$source)) {
+            this["db_port"] = "";
+        }
+        if (!("db_user" in $$source)) {
+            this["db_user"] = "";
+        }
+        if (!("db_pass" in $$source)) {
+            this["db_pass"] = "";
+        }
+        if (!("db_name" in $$source)) {
+            this["db_name"] = "";
+        }
+        if (!("db_path" in $$source)) {
+            this["db_path"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DBTestParams instance from a string or object.
+     */
+    static createFrom($$source: any = {}): DBTestParams {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new DBTestParams($$parsedSource as Partial<DBTestParams>);
+    }
+}
+
+/**
+ * DBTestResultVO 数据库测试结果
+ */
+export class DBTestResultVO {
+    "success": boolean;
+    "message": string;
+
+    /** Creates a new DBTestResultVO instance. */
+    constructor($$source: Partial<DBTestResultVO> = {}) {
+        if (!("success" in $$source)) {
+            this["success"] = false;
+        }
+        if (!("message" in $$source)) {
+            this["message"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DBTestResultVO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): DBTestResultVO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new DBTestResultVO($$parsedSource as Partial<DBTestResultVO>);
+    }
+}
+
+/**
  * HourlyStatBreakdownVO 分时详细拆分（堆叠图用），复用 model 层定义
  */
 export const HourlyStatBreakdownVO = model$0.HourlyBreakdownItem;

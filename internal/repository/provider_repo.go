@@ -1,29 +1,30 @@
 package repository
 
 import (
-	"github.com/wanglejiu/llm-proxy/internal/model"
 	"log/slog"
+
+	"github.com/wanglejiu/llm-proxy/internal/model"
 
 	"gorm.io/gorm"
 )
 
 type ProviderRepository struct {
-	db *gorm.DB
+	dbManager *DBManager
 }
 
-func NewProviderRepository(db *gorm.DB) *ProviderRepository {
-	return &ProviderRepository{db: db}
+func NewProviderRepository(dbManager *DBManager) *ProviderRepository {
+	return &ProviderRepository{dbManager: dbManager}
 }
 
 // Create 创建Provider配置
 func (r *ProviderRepository) Create(provider *model.ProviderConfig) error {
-	return r.db.Create(provider).Error
+	return r.dbManager.GetDB().Create(provider).Error
 }
 
 // GetByID 根据ID获取Provider（记录不存在时返回"已删除"占位，不报错）
 func (r *ProviderRepository) GetByID(id uint) (*model.ProviderConfig, error) {
 	var provider model.ProviderConfig
-	err := r.db.First(&provider, id).Error
+	err := r.dbManager.GetDB().First(&provider, id).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return &model.ProviderConfig{
@@ -40,18 +41,18 @@ func (r *ProviderRepository) GetByID(id uint) (*model.ProviderConfig, error) {
 // GetAll 获取所有Provider
 func (r *ProviderRepository) GetAll() ([]model.ProviderConfig, error) {
 	var providers []model.ProviderConfig
-	err := r.db.Order("id desc").Find(&providers).Error
+	err := r.dbManager.GetDB().Order("id desc").Find(&providers).Error
 	return providers, err
 }
 
-// Update 更新Provider
+// Update 更新Provider（只更新业务字段，不覆盖 created_at）
 func (r *ProviderRepository) Update(provider *model.ProviderConfig) error {
-	return r.db.Save(provider).Error
+	return r.dbManager.GetDB().Model(provider).Select("name", "auto_suffix", "url_suffix", "base_url", "api_key", "models", "updated_at").Updates(provider).Error
 }
 
 // Delete 删除Provider（先将关联日志的ProviderID置为DeletedProviderID，再删除Provider）
 func (r *ProviderRepository) Delete(id uint) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
+	return r.dbManager.GetDB().Transaction(func(tx *gorm.DB) error {
 		// 将关联的请求日志的ProviderID置为DeletedProviderID
 		if err := tx.Model(&model.RequestLog{}).Where("provider_id = ?", id).Update("provider_id", model.DeletedProviderID).Error; err != nil {
 			return err
@@ -62,7 +63,7 @@ func (r *ProviderRepository) Delete(id uint) error {
 
 // ImportAll 批量导入Provider配置
 func (r *ProviderRepository) ImportAll(providers []model.ProviderConfig) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
+	return r.dbManager.GetDB().Transaction(func(tx *gorm.DB) error {
 		// 将所有请求日志的ProviderID置为DeletedProviderID
 		if err := tx.Model(&model.RequestLog{}).Where("provider_id != ?", model.DeletedProviderID).Update("provider_id", model.DeletedProviderID).Error; err != nil {
 			return err

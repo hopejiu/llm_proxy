@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -20,10 +21,10 @@ import (
 
 // ProviderService Wails 绑定服务：Provider 管理
 type ProviderService struct {
-	svc    *service.ProviderService
-	cfg    *config.Config
-	proxy  *service.ProxyService
-	ctx    context.Context
+	svc   *service.ProviderService
+	cfg   *config.Config
+	proxy *service.ProxyService
+	ctx   context.Context
 }
 
 func NewProviderService(svc *service.ProviderService, cfg *config.Config, proxy *service.ProxyService) *ProviderService {
@@ -55,22 +56,26 @@ func (s *ProviderService) GetProvider(id uint) (ProviderVO, error) {
 
 // CreateProvider 创建 Provider
 func (s *ProviderService) CreateProvider(data ProviderCreateVO) (ProviderVO, error) {
+	slog.Debug("[CreateProvider] 收到创建请求", "name", data.Name, "models_len", len(data.Models), "models_raw", data.Models)
 	provider := createVOToModel(data)
 	if err := s.svc.CreateProvider(provider); err != nil {
-		return ProviderVO{}, NewAppError("INTERNAL", "创建Provider失败")
+		slog.Error("[CreateProvider] 创建失败", "name", data.Name, "error", err, "models", data.Models)
+		return ProviderVO{}, NewAppError("INTERNAL", "创建Provider失败: "+err.Error())
 	}
 	return providerToVO(provider), nil
 }
 
 // UpdateProvider 更新 Provider（含 API Key 保留逻辑）
 func (s *ProviderService) UpdateProvider(id uint, data ProviderUpdateVO) (ProviderVO, error) {
+	slog.Debug("[UpdateProvider] 收到更新请求", "id", id, "name", data.Name, "models_len", len(data.Models), "models_raw", data.Models)
 	preservedKey, err := s.svc.PreserveAPIKey(id, data.APIKey)
 	if err == nil {
 		data.APIKey = preservedKey
 	}
 	provider := updateVOToModel(id, data)
 	if err := s.svc.UpdateProvider(provider); err != nil {
-		return ProviderVO{}, NewAppError("INTERNAL", "更新Provider失败")
+		slog.Error("[UpdateProvider] 更新失败", "id", id, "name", data.Name, "error", err, "models", data.Models)
+		return ProviderVO{}, NewAppError("INTERNAL", "更新Provider失败: "+err.Error())
 	}
 	return providerToVO(provider), nil
 }
