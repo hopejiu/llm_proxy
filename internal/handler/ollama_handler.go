@@ -177,16 +177,8 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, body []byte, startTime 
 			if strings.HasPrefix(line, "data: ") {
 				data := strings.TrimPrefix(line, "data: ")
 				if data == "[DONE]" {
-					// 在 [DONE] 之前写入独立会话标记
-					if !ollamaSessionInjected && isNewSession(c.Request.Context()) && sessionID > 0 {
-						suffix := fmt.Sprintf("%s%d%s", sessionMarkPrefix, sessionID, sessionMarkSuffix)
-						markChunk := fmt.Sprintf(`{"id":"%s","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"%s"}}]}`,
-							requestID, suffix)
-						c.Writer.Write([]byte("data: " + markChunk + "\n\n"))
-						c.Writer.Flush()
-						ollamaSessionInjected = true
-						slog.Info("[session] ===> Ollama流式注入 #1（独立行）", "sessionID", sessionID)
-					}
+					// 在 [DONE] 之前写入独立会话标记行
+					WriteStreamSessionMark(c.Writer, c.Request.Context(), requestID, sessionID, &ollamaSessionInjected)
 					return true // 收到 [DONE]，停止处理
 				}
 
@@ -233,8 +225,7 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, body []byte, startTime 
 	// 仅当流式 processor 中尚未注入时才在 finalResp 注入，防重复
 	suffix := ""
 	if !ollamaSessionInjected && isNewSession(c.Request.Context()) && sessionID > 0 {
-		suffix = fmt.Sprintf("%s%d%s", sessionMarkPrefix, sessionID, sessionMarkSuffix)
-		slog.Info("[session] ===> Ollama finalResp注入", "sessionID", sessionID)
+		suffix = service.BuildSessionSuffix(sessionID)
 	}
 
 	finalResp := model.OllamaChatResponse{
@@ -252,7 +243,7 @@ func (h *OllamaHandler) handleStreamChat(c *gin.Context, body []byte, startTime 
 
 	ollamaFullContent := fullContent.String()
 	if ollamaSessionInjected {
-		ollamaFullContent += fmt.Sprintf("%s%d%s", sessionMarkPrefix, sessionID, sessionMarkSuffix)
+		ollamaFullContent += service.BuildSessionSuffix(sessionID)
 	}
 
 	reqLog := &model.RequestLog{

@@ -172,15 +172,9 @@ func (h *AnthropicHandler) handleStreamMessages(c *gin.Context, body []byte, sta
 		openAIBody,
 		h.DefaultStreamRetryConfig(),
 		func(line string, currentTokens *StreamTokens) bool {
-			// 在 [DONE] 前注入独立会话标记行（不要改 finish_reason chunk）
-			if !anthropicSessionInjected && isNewSession(c.Request.Context()) && sessionID > 0 &&
-				strings.HasPrefix(line, "data: ") && strings.TrimPrefix(line, "data: ") == "[DONE]" {
-				suffix := fmt.Sprintf("%s%d%s", sessionMarkPrefix, sessionID, sessionMarkSuffix)
-				markChunk := fmt.Sprintf(`{"id":"%s","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"%s"}}]}`,
-					requestID, suffix)
-				SafeWriteSSE(c, "data: "+markChunk+"\n\n")
-				anthropicSessionInjected = true
-				slog.Info("[session] ===> Anthropic流式注入 #1（独立行）", "sessionID", sessionID)
+			// 在 [DONE] 前注入独立会话标记行
+			if strings.HasPrefix(line, "data: ") && strings.TrimPrefix(line, "data: ") == "[DONE]" {
+				WriteStreamSessionMark(c.Writer, c.Request.Context(), requestID, sessionID, &anthropicSessionInjected)
 			}
 			return state.processLine(line, currentTokens)
 		},
@@ -203,7 +197,7 @@ func (h *AnthropicHandler) handleStreamMessages(c *gin.Context, body []byte, sta
 
 	anthropicContent := state.fullContent.String()
 	if anthropicSessionInjected {
-		anthropicContent += fmt.Sprintf("%s%d%s", sessionMarkPrefix, sessionID, sessionMarkSuffix)
+		anthropicContent += service.BuildSessionSuffix(sessionID)
 	}
 
 	reqLog := &model.RequestLog{

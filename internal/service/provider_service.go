@@ -6,9 +6,9 @@ import (
 	"strings"
 )
 
-// CacheInvalidator 缓存失效接口，用于解耦 ProviderService 与 ProxyService
+// CacheInvalidator 缓存失效接口，用于解耦 ProviderService 与 ProviderCache
 type CacheInvalidator interface {
-	InvalidateCache()
+	Invalidate()
 }
 
 type ProviderService struct {
@@ -23,11 +23,14 @@ func NewProviderService(repo *repository.ProviderRepository, cacheInv CacheInval
 	}
 }
 
+// ProviderCacheInvalidator 使 ProviderCache 实现 CacheInvalidator 接口
+func (c *ProviderCache) InvalidateCache() { c.Invalidate() }
+
 // CreateProvider 创建Provider
 func (s *ProviderService) CreateProvider(provider *model.ProviderConfig) error {
 	err := s.repo.Create(provider)
 	if err == nil && s.cacheInv != nil {
-		s.cacheInv.InvalidateCache()
+		s.cacheInv.Invalidate()
 	}
 	return err
 }
@@ -42,11 +45,24 @@ func (s *ProviderService) GetAllProviders() ([]model.ProviderConfig, error) {
 	return s.repo.GetAll()
 }
 
+// GetProvidersByIDs 批量获取 Provider 名称（用于消除绑定服务层 N+1）
+func (s *ProviderService) GetProvidersByIDs(ids []uint) (map[uint]string, error) {
+	providers, err := s.repo.GetByIDs(ids)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[uint]string, len(providers))
+	for id, p := range providers {
+		result[id] = p.Name
+	}
+	return result, nil
+}
+
 // UpdateProvider 更新Provider
 func (s *ProviderService) UpdateProvider(provider *model.ProviderConfig) error {
 	err := s.repo.Update(provider)
 	if err == nil && s.cacheInv != nil {
-		s.cacheInv.InvalidateCache()
+		s.cacheInv.Invalidate()
 	}
 	return err
 }
@@ -55,7 +71,7 @@ func (s *ProviderService) UpdateProvider(provider *model.ProviderConfig) error {
 func (s *ProviderService) DeleteProvider(id uint) error {
 	err := s.repo.Delete(id)
 	if err == nil && s.cacheInv != nil {
-		s.cacheInv.InvalidateCache()
+		s.cacheInv.Invalidate()
 	}
 	return err
 }
@@ -64,7 +80,7 @@ func (s *ProviderService) DeleteProvider(id uint) error {
 func (s *ProviderService) ImportAll(providers []model.ProviderConfig) error {
 	err := s.repo.ImportAll(providers)
 	if err == nil && s.cacheInv != nil {
-		s.cacheInv.InvalidateCache()
+		s.cacheInv.Invalidate()
 	}
 	return err
 }

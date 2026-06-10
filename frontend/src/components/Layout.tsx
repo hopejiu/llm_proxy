@@ -7,7 +7,7 @@ import { useToast } from "../components/Toast";
 import { useHotkey } from "../hooks/useHotkey";
 
 const navItems = [
-  { to: "/providers", icon: Server, label: "Providers", hotkey: "1" },
+  { to: "/providers", icon: Server, label: "提供商", hotkey: "1" },
   { to: "/stats", icon: BarChart3, label: "统计", hotkey: "2" },
   { to: "/sessions", icon: MessageSquare, label: "会话", hotkey: "6" },
   { to: "/logs", icon: ScrollText, label: "日志", hotkey: "3" },

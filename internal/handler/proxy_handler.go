@@ -195,16 +195,8 @@ func (h *ProxyHandler) handleStreamRequestOpenAI(c *gin.Context, body []byte, pr
 			if strings.HasPrefix(line, "data: ") {
 				data := strings.TrimPrefix(line, "data: ")
 				if data == "[DONE]" {
-					// 在 [DONE] 之前写入独立会话标记行（避免加到 finish_reason chunk 被客户端忽略）
-					if !sessionInjected && isNewSession(c.Request.Context()) && sessionID > 0 {
-						suffix := fmt.Sprintf("%s%d%s", sessionMarkPrefix, sessionID, sessionMarkSuffix)
-						markChunk := fmt.Sprintf(`{"id":"%s","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"%s"}}]}`,
-							requestID, suffix)
-						c.Writer.Write([]byte("data: " + markChunk + "\n\n"))
-						c.Writer.Flush()
-						sessionInjected = true
-						slog.Info("[session] ===> 流式注入 #1（独立行）", "sessionID", sessionID)
-					}
+					// 在 [DONE] 之前写入独立会话标记行
+					WriteStreamSessionMark(c.Writer, c.Request.Context(), requestID, sessionID, &sessionInjected)
 
 					c.Writer.Write([]byte(line + "\n\n"))
 					c.Writer.Flush()
@@ -258,8 +250,7 @@ func (h *ProxyHandler) handleStreamRequestOpenAI(c *gin.Context, body []byte, pr
 	// 流式注入的标记在 processor 中已写入客户端，但 responseBuilder 捕获的是原始行
 	// 此处补回 sessionContent，使数据库记录与实际客户端接收一致
 	if sessionInjected {
-		suffix := fmt.Sprintf("%s%d%s", sessionMarkPrefix, sessionID, sessionMarkSuffix)
-		reqLog.ResponseContent += suffix
+		reqLog.ResponseContent += service.BuildSessionSuffix(sessionID)
 	}
 	reqLog.InputTokens = tokens.InputTokens
 	reqLog.OutputTokens = tokens.OutputTokens

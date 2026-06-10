@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
 import { AppAPI } from "../services";
+import { usePolling } from "../hooks/usePolling";
 import logger from "../lib/logger";
 
 export interface ProxyStatus {
@@ -32,11 +33,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => {
-    refreshProxyStatus();
-    const interval = setInterval(refreshProxyStatus, 3000);
-    return () => clearInterval(interval);
-  }, [refreshProxyStatus]);
+  // 全局 3s 轮询代理状态
+  usePolling(refreshProxyStatus, 3000);
 
   return (
     <AppContext.Provider value={{ proxyStatus, loading, refreshProxyStatus }}>

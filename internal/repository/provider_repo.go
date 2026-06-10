@@ -45,9 +45,25 @@ func (r *ProviderRepository) GetAll() ([]model.ProviderConfig, error) {
 	return providers, err
 }
 
+// GetByIDs 批量获取 Provider（用于消除绑定服务层 N+1）
+func (r *ProviderRepository) GetByIDs(ids []uint) (map[uint]model.ProviderConfig, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var providers []model.ProviderConfig
+	if err := r.dbManager.GetDB().Where("id IN ?", ids).Find(&providers).Error; err != nil {
+		return nil, err
+	}
+	result := make(map[uint]model.ProviderConfig, len(providers))
+	for i := range providers {
+		result[providers[i].ID] = providers[i]
+	}
+	return result, nil
+}
+
 // Update 更新Provider（只更新业务字段，不覆盖 created_at）
 func (r *ProviderRepository) Update(provider *model.ProviderConfig) error {
-	return r.dbManager.GetDB().Model(provider).Select("name", "auto_suffix", "url_suffix", "base_url", "api_key", "models", "updated_at").Updates(provider).Error
+	return r.dbManager.GetDB().Model(provider).Select("name", "auto_suffix", "url_suffix", "base_url", "api_key", "models", "enable_extra_params", "updated_at").Updates(provider).Error
 }
 
 // Delete 删除Provider（先将关联日志的ProviderID置为DeletedProviderID，再删除Provider）

@@ -41,49 +41,32 @@ type Config struct {
 	AutoStartApp   bool // 开机自启动
 }
 
-// ========== 可热更新字段的 Getter ==========
+// ========== 可热更新字段的 Getter（使用泛型辅助消除 RLock 样板代码）==========
+
+// readLocked 泛型辅助：在 RLock 保护下读取并返回字段值
+func readLocked[T any](mu *sync.RWMutex, fn func() T) T {
+	mu.RLock()
+	defer mu.RUnlock()
+	return fn()
+}
 
 // GetProxyPort 获取代理端口
-func (c *Config) GetProxyPort() string {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.ProxyPort
-}
+func (c *Config) GetProxyPort() string { return readLocked(&c.mu, func() string { return c.ProxyPort }) }
 
 // GetStreamMaxRetries 获取流式最大重试次数
-func (c *Config) GetStreamMaxRetries() int {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.StreamMaxRetries
-}
+func (c *Config) GetStreamMaxRetries() int { return readLocked(&c.mu, func() int { return c.StreamMaxRetries }) }
 
 // GetRetryDelayBase 获取重试延迟基数
-func (c *Config) GetRetryDelayBase() time.Duration {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.RetryDelayBase
-}
+func (c *Config) GetRetryDelayBase() time.Duration { return readLocked(&c.mu, func() time.Duration { return c.RetryDelayBase }) }
 
 // GetProviderCacheTTL 获取 Provider 缓存 TTL
-func (c *Config) GetProviderCacheTTL() time.Duration {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.ProviderCacheTTL
-}
+func (c *Config) GetProviderCacheTTL() time.Duration { return readLocked(&c.mu, func() time.Duration { return c.ProviderCacheTTL }) }
 
 // GetLogCleanupDays 获取日志清理天数
-func (c *Config) GetLogCleanupDays() int {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.LogCleanupDays
-}
+func (c *Config) GetLogCleanupDays() int { return readLocked(&c.mu, func() int { return c.LogCleanupDays }) }
 
 // GetLogLevel 获取日志级别
-func (c *Config) GetLogLevel() string {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.LogLevel
-}
+func (c *Config) GetLogLevel() string { return readLocked(&c.mu, func() string { return c.LogLevel }) }
 
 // ========== 热更新方法 ==========
 

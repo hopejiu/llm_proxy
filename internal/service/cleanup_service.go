@@ -122,7 +122,7 @@ func (s *CleanupService) Start(ctx context.Context) {
 	defer hourlyTimer.Stop()
 
 	// 计算到下一个凌晨3点的时长
-	dailyTimer := s.scheduleNextDaily()
+	dailyTimer := time.NewTimer(s.scheduleNextDailyDuration())
 	defer dailyTimer.Stop()
 
 	// 启动后立即汇总上一个小时
@@ -155,6 +155,16 @@ func (s *CleanupService) Start(ctx context.Context) {
 	}
 }
 
+// durationUntilNext 通用辅助：计算到下一个目标时间点（hour:min:sec）的时长
+func durationUntilNext(hour, min, sec int) time.Duration {
+	now := time.Now()
+	next := time.Date(now.Year(), now.Month(), now.Day(), hour, min, sec, 0, now.Location())
+	if !next.After(now) {
+		next = next.Add(24 * time.Hour)
+	}
+	return next.Sub(now)
+}
+
 // scheduleNextHourDuration 计算到下一个整点的时长
 func (s *CleanupService) scheduleNextHourDuration() time.Duration {
 	now := time.Now()
@@ -162,17 +172,7 @@ func (s *CleanupService) scheduleNextHourDuration() time.Duration {
 	return nextHour.Sub(now)
 }
 
-// scheduleNextDaily 创建一个在下一个凌晨3点触发的定时器
-func (s *CleanupService) scheduleNextDaily() *time.Timer {
-	return time.NewTimer(s.scheduleNextDailyDuration())
-}
-
 // scheduleNextDailyDuration 计算到下一个凌晨3点的时长
 func (s *CleanupService) scheduleNextDailyDuration() time.Duration {
-	now := time.Now()
-	next := time.Date(now.Year(), now.Month(), now.Day(), 3, 0, 0, 0, now.Location())
-	if !next.After(now) {
-		next = next.Add(24 * time.Hour)
-	}
-	return next.Sub(now)
+	return durationUntilNext(3, 0, 0)
 }

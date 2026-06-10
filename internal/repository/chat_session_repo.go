@@ -41,6 +41,7 @@ func (r *ChatSessionRepository) GetAll() ([]model.ChatSession, error) {
 }
 
 // GetPaginated 分页查询会话列表，sessionID > 0 时按 ID 精确搜索
+// 默认排除 total_tokens = 0 的无效会话（按 ID 搜索时不过滤）
 // 返回会话列表和总条数
 func (r *ChatSessionRepository) GetPaginated(page, pageSize int, sessionID uint) ([]model.ChatSession, int64, error) {
 	var sessions []model.ChatSession
@@ -49,6 +50,8 @@ func (r *ChatSessionRepository) GetPaginated(page, pageSize int, sessionID uint)
 	q := r.dbManager.GetDB().Model(&model.ChatSession{})
 	if sessionID > 0 {
 		q = q.Where("id = ?", sessionID)
+	} else {
+		q = q.Where("total_tokens > 0")
 	}
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err

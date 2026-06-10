@@ -62,8 +62,8 @@ func (h *BaseHandler) HandleProxyRequest(
 
 	// 会话ID 解析：提取标记 → 清洗 body → 存入 context
 	var sessionID uint
-	if h.sessionMgr != nil {
-		sid, cleanBody, newSess := h.sessionMgr.ResolveSession(body)
+	if h.sessionSvc != nil {
+		sid, cleanBody, newSess := h.sessionSvc.ResolveSession(body)
 		slog.Info("[session] ResolveSession", "sid", sid, "isNew", newSess, "bodyHasSession", strings.Contains(string(body), "[SESSION]"))
 		if sid > 0 {
 			sessionID = sid
@@ -119,8 +119,8 @@ func (h *BaseHandler) HandleProxyRequest(
 	}
 
 	// 请求结束后更新会话统计
-	if h.sessionMgr != nil && sessionID > 0 {
-		h.sessionMgr.RecalcSessionStats(sessionID)
+	if h.sessionSvc != nil && sessionID > 0 {
+		h.sessionSvc.RecalcSessionStats(sessionID)
 	}
 }
 
@@ -141,7 +141,7 @@ type BaseHandler struct {
 	httpClient     *http.Client
 	cfg            *config.Config
 	tracker        *ActiveRequestTracker
-	sessionMgr     *SessionManager // 会话管理器（nil 表示未启用会话追踪）
+	sessionSvc     *service.SessionService // 会话服务（nil 表示未启用会话追踪）
 }
 
 // NewBaseHandler 创建 BaseHandler 实例
@@ -164,9 +164,9 @@ func NewBaseHandler(proxyService *service.ProxyService, requestLogRepo *reposito
 	}
 }
 
-// WithSessionManager 设置会话管理器（启用会话追踪）
-func (h *BaseHandler) WithSessionManager(sm *SessionManager) {
-	h.sessionMgr = sm
+// WithSessionService 设置会话服务（启用会话追踪）
+func (h *BaseHandler) WithSessionService(svc *service.SessionService) {
+	h.sessionSvc = svc
 }
 
 // generateRequestID 生成请求 ID

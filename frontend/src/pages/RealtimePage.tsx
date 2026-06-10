@@ -63,6 +63,8 @@ export default function RealtimePage() {
   const [, forceUpdate] = useState(0);
 
   const streamingCount = requests.filter((r) => r.status === "streaming").length;
+  const streamingCountRef = useRef(streamingCount);
+  streamingCountRef.current = streamingCount;
   const activeDetail = activeDetailId ? requests.find((r) => r.request_id === activeDetailId) || null : null;
 
   // 初始全量拉取（页面打开时获取当前状态）
@@ -124,17 +126,22 @@ export default function RealtimePage() {
   }, [fetchData]);
 
   // 轮询：仅用于"最近完成的请求"，每 2s 刷新；有正在进行的请求时跳过
+  // 通过 ref 读取最新 streamingCount，避免依赖变化导致 interval 重建
   useEffect(() => {
     autoRef.current = setInterval(async () => {
-      if (streamingCount > 0) return;
+      const now = new Date().toLocaleTimeString();
+      if (streamingCountRef.current > 0) {
+        setUpdateTime(now);
+        return;
+      }
       try {
         const logs = await StatsAPI.getRecentLogs(30);
         setRecentLogs(logs || []);
-        setUpdateTime(new Date().toLocaleTimeString());
+        setUpdateTime(now);
       } catch {}
     }, 2000);
     return () => { if (autoRef.current) clearInterval(autoRef.current); };
-  }, [streamingCount]);
+  }, []);
 
   function elapsedSince(t: string): string {
     return ((Date.now() - new Date(t).getTime()) / 1000).toFixed(1);
@@ -166,9 +173,6 @@ export default function RealtimePage() {
             <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.5)] animate-pulse" />
             正在进行的请求
           </h2>
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-[#9C94B0]">{updateTime ? `日志更新于 ${updateTime}` : "-"}</span>
-          </div>
         </div>
 
         {requests.length === 0 ? (

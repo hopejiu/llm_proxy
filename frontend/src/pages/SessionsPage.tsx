@@ -201,12 +201,13 @@ export default function SessionsPage() {
                 <MessageSquare size={18} strokeWidth={1.5} className="text-brand-600" />
                 会话 #{session.id}
               </h2>
-              <span className="text-xs text-[#6B6580]">{session.created_at}</span>
             </div>
-            <div className="grid grid-cols-4 gap-4 text-sm">
+            <div className="grid grid-cols-3 gap-4 text-sm">
               <div><span className="text-[#6B6580]">请求数</span><p className="font-semibold">{session.request_count}</p></div>
               <div><span className="text-[#6B6580]">总 Token</span><p className="font-semibold">{formatTokens(session.total_tokens)}</p></div>
               <div><span className="text-[#6B6580]">总成本</span><p className="font-semibold">{formatCost(session.total_cost)}</p></div>
+              <div><span className="text-[#6B6580]">创建时间</span><p className="font-semibold text-xs">{session.created_at}</p></div>
+              <div><span className="text-[#6B6580]">最后更新</span><p className="font-semibold text-xs">{session.updated_at}</p></div>
               <div>
                 <span className="text-[#6B6580]">模型</span>
                 <div className="flex flex-wrap gap-1 mt-1">
@@ -295,6 +296,7 @@ export default function SessionsPage() {
                   <th className="text-right px-5 py-3 font-medium">总 Token</th>
                   <th className="text-right px-5 py-3 font-medium">总成本</th>
                   <th className="text-right px-5 py-3 font-medium">创建时间</th>
+                  <th className="text-right px-5 py-3 font-medium">最后更新</th>
                   <th className="text-center px-5 py-3 font-medium">操作</th>
                 </tr>
               </thead>
@@ -315,6 +317,7 @@ export default function SessionsPage() {
                     <td className="px-5 py-3 text-right">{formatTokens(s.total_tokens)}</td>
                     <td className="px-5 py-3 text-right">{formatCost(s.total_cost)}</td>
                     <td className="px-5 py-3 text-right text-[#6B6580] text-xs">{s.created_at}</td>
+                    <td className="px-5 py-3 text-right text-[#6B6580] text-xs">{s.updated_at}</td>
                     <td className="px-5 py-3 text-center">
                       <button
                         onClick={() => openSession(s.id)}

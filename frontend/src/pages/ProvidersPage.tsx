@@ -27,6 +27,7 @@ interface ProviderForm {
   auto_suffix: boolean;
   url_suffix: string;
   models: ModelEntry[];
+  enable_extra_params: boolean;
 }
 
 interface FormErrors {
@@ -42,6 +43,7 @@ const emptyForm: ProviderForm = {
   name: "", base_url: "", api_key: "",
   auto_suffix: false, url_suffix: "v1/chat/completions",
   models: [],
+  enable_extra_params: true,
 };
 
 /* ---------- helpers ---------- */
@@ -145,11 +147,13 @@ function ModelCard({
   index,
   onChange,
   onRemove,
+  enableExtraParams,
 }: {
   entry: ModelEntry;
   index: number;
   onChange: (idx: number, next: ModelEntry) => void;
   onRemove: (idx: number) => void;
+  enableExtraParams?: boolean;
 }) {
   const [collapsed, setCollapsed] = useState(true);
 
@@ -171,19 +175,21 @@ function ModelCard({
           placeholder="上游模型名（如 gpt-4）"
           className="flex-1 text-sm font-medium bg-white border border-[#EDE9FE] rounded-lg px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand-600/20 focus:border-brand-600/40 transition-all placeholder:text-[#C4BDD5]"
         />
-        <button
-          type="button"
-          onClick={() => setCollapsed(!collapsed)}
-          className="text-[#9C94B0] hover:text-[#6B6580] p-1 transition-colors"
-          aria-label={collapsed ? "展开扩展参数" : "收起扩展参数"}
-        >
-          <svg
-            className={`w-4 h-4 transition-transform ${collapsed ? "" : "rotate-180"}`}
-            fill="none" stroke="currentColor" viewBox="0 0 24 24"
+        {enableExtraParams && (
+          <button
+            type="button"
+            onClick={() => setCollapsed(!collapsed)}
+            className="text-[#9C94B0] hover:text-[#6B6580] p-1 transition-colors"
+            aria-label={collapsed ? "展开扩展参数" : "收起扩展参数"}
           >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
+            <svg
+              className={`w-4 h-4 transition-transform ${collapsed ? "" : "rotate-180"}`}
+              fill="none" stroke="currentColor" viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+        )}
         <button
           type="button"
           onClick={() => onRemove(index)}
@@ -242,7 +248,7 @@ function ModelCard({
       </div>
 
       {/* Extra params (collapsible) */}
-      {!collapsed && (
+      {enableExtraParams && !collapsed && (
         <div className="px-3 pb-3">
           <label className="text-[11px] font-medium text-[#9C94B0] mb-1 block">
             扩展参数 (JSON)
@@ -329,6 +335,7 @@ export default function ProvidersPage() {
       auto_suffix: p.auto_suffix || false,
       url_suffix: p.url_suffix || "",
       models,
+      enable_extra_params: p.enable_extra_params !== false,
     });
     setEditingId(p.id);
     setErrors({});
@@ -697,6 +704,22 @@ export default function ProvidersPage() {
             </p>
           </div>
 
+          {/* Enable extra params toggle */}
+          <div>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.enable_extra_params}
+                onChange={(e) => handleFieldChange("enable_extra_params", e.target.checked)}
+                className="w-4 h-4 rounded border-[#EDE9FE] text-brand-600 focus:ring-brand-600/20"
+              />
+              <span className="text-sm text-[#6B6580] cursor-pointer">启用扩展参数</span>
+            </label>
+            <p className="form-helper mt-1">
+              关闭后，所有模型的扩展参数（extra_params）将不会发送到上游 API，已有配置保留不变。
+            </p>
+          </div>
+
           {/* Models section */}
           <div>
             <div className="flex items-center justify-between mb-2">
@@ -744,6 +767,7 @@ export default function ProvidersPage() {
                   index={i}
                   onChange={handleModelChange}
                   onRemove={removeModel}
+                  enableExtraParams={form.enable_extra_params}
                 />
               ))}
             </div>

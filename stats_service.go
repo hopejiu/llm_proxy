@@ -286,7 +286,23 @@ func (s *StatsService) GetActiveRequest(requestID string) (ActiveRequestVO, erro
 	return ActiveRequestVO{}, NewAppError("NOT_FOUND", "请求已完成")
 }
 
-// buildProviderNameMap 批量查询 Provider 名称，避免 N+1
+// resolveProviderNames 批量查询 Provider 名称（一次 IN 查询代替 N+1）
+func (s *StatsService) resolveProviderNames(ids map[uint]bool) map[uint]string {
+	if len(ids) == 0 {
+		return nil
+	}
+	idList := make([]uint, 0, len(ids))
+	for id := range ids {
+		idList = append(idList, id)
+	}
+	names, err := s.providerSvc.GetProvidersByIDs(idList)
+	if err != nil {
+		return nil
+	}
+	return names
+}
+
+// buildProviderNameMap 从 RequestLog 列表收集 ProviderID 并批量查询名称
 func (s *StatsService) buildProviderNameMap(logs []model.RequestLog) map[uint]string {
 	providerIDs := make(map[uint]bool)
 	for _, log := range logs {
@@ -297,7 +313,7 @@ func (s *StatsService) buildProviderNameMap(logs []model.RequestLog) map[uint]st
 	return s.resolveProviderNames(providerIDs)
 }
 
-// buildProviderNames 从 ModelDailyStat 列表批量查询 Provider 名称
+// buildProviderNames 从 ModelDailyStat 列表收集 ProviderID 并批量查询名称
 func (s *StatsService) buildProviderNames(stats []repository.ModelDailyStat) map[uint]string {
 	providerIDs := make(map[uint]bool)
 	for _, stat := range stats {
@@ -306,15 +322,4 @@ func (s *StatsService) buildProviderNames(stats []repository.ModelDailyStat) map
 		}
 	}
 	return s.resolveProviderNames(providerIDs)
-}
-
-// resolveProviderNames 通用 ProviderID→Name 解析
-func (s *StatsService) resolveProviderNames(ids map[uint]bool) map[uint]string {
-	names := make(map[uint]string)
-	for id := range ids {
-		if p, err := s.providerSvc.GetProvider(id); err == nil {
-			names[id] = p.Name
-		}
-	}
-	return names
 }

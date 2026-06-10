@@ -5,84 +5,34 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
-	"time"
 
-	"github.com/wanglejiu/llm-proxy/internal/config"
 	"github.com/wanglejiu/llm-proxy/internal/model"
-	"github.com/wanglejiu/llm-proxy/internal/repository"
 )
 
-// ProxyService 代理服务
+// ProxyService 代理服务：Provider 查询与请求体准备
+// 缓存由 ProviderCache 独立管理
 type ProxyService struct {
-	providerRepo  *repository.ProviderRepository
-	cacheMu       sync.RWMutex
-	providerCache []model.ProviderConfig
-	cacheExpiry   time.Time
-	cfg           *config.Config
+	providerCache *ProviderCache
 }
 
 // NewProxyService 创建代理服务实例
-func NewProxyService(providerRepo *repository.ProviderRepository, cfg *config.Config) *ProxyService {
+func NewProxyService(providerCache *ProviderCache) *ProxyService {
 	return &ProxyService{
-		providerRepo: providerRepo,
-		cfg:          cfg,
+		providerCache: providerCache,
 	}
 }
 
 // Close 关闭 ProxyService 持有的资源（当前无资源需要关闭）
 func (s *ProxyService) Close() {}
 
-// getAllProvidersCached 获取 Provider 列表（优先读缓存）
-func (s *ProxyService) getAllProvidersCached() ([]model.ProviderConfig, error) {
-	s.cacheMu.RLock()
-	if time.Now().Before(s.cacheExpiry) {
-		providers := make([]model.ProviderConfig, len(s.providerCache))
-		copy(providers, s.providerCache)
-		s.cacheMu.RUnlock()
-		return providers, nil
-	}
-	s.cacheMu.RUnlock()
-
-	// 缓存过期，从数据库加载
-	s.cacheMu.Lock()
-	defer s.cacheMu.Unlock()
-
-	// 双重检查
-	if time.Now().Before(s.cacheExpiry) {
-		result := make([]model.ProviderConfig, len(s.providerCache))
-		copy(result, s.providerCache)
-		return result, nil
-	}
-
-	providers, err := s.providerRepo.GetAll()
-	if err != nil {
-		return nil, err
-	}
-
-	s.providerCache = providers
-	s.cacheExpiry = time.Now().Add(s.cfg.GetProviderCacheTTL())
-	// 返回深拷贝，防止调用者修改影响缓存
-	result := make([]model.ProviderConfig, len(providers))
-	copy(result, providers)
-	return result, nil
-}
-
-// InvalidateCache 主动失效缓存（Provider 增删改时调用）
-func (s *ProxyService) InvalidateCache() {
-	s.cacheMu.Lock()
-	defer s.cacheMu.Unlock()
-	s.cacheExpiry = time.Time{}
-}
-
-// GetAllProviders 获取所有 Provider
+// GetAllProviders 获取所有 Provider（通过 ProviderCache 带缓存读取）
 func (s *ProxyService) GetAllProviders() ([]model.ProviderConfig, error) {
-	return s.getAllProvidersCached()
+	return s.providerCache.GetAll()
 }
 
 // GetProviderByModel 根据模型名匹配 Provider，遍历所有 Provider 的 Models 配置
 func (s *ProxyService) GetProviderByModel(modelName string) (model.ProviderConfig, error) {
-	providers, err := s.getAllProvidersCached()
+	providers, err := s.providerCache.GetAll()
 	if err != nil {
 		slog.Error("获取Provider列表失败", "error", err)
 		return model.ProviderConfig{}, fmt.Errorf("failed to get providers: %v", err)
@@ -128,8 +78,8 @@ func (s *ProxyService) PrepareRequestBody(reqBody []byte, provider model.Provide
 		if entry := provider.FindModelEntry(reqInfo.Model); entry != nil {
 			reqMap["model"] = entry.Name
 
-			// 合并模型级 ExtraParams
-			if entry.ExtraParams != "" {
+			// 合并模型级 ExtraParams（仅在启用时）
+			if provider.EnableExtraParams && entry.ExtraParams != "" {
 				var ep map[string]interface{}
 				if err := json.Unmarshal([]byte(entry.ExtraParams), &ep); err == nil {
 					for key, value := range ep {

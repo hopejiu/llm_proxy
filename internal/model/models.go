@@ -21,15 +21,16 @@ type ModelEntry struct {
 
 // ProviderConfig 第三方LLM服务商配置
 type ProviderConfig struct {
-	ID         uint      `json:"id" gorm:"primaryKey"`
-	Name       string    `json:"name" gorm:"size:100;not null"`
-	AutoSuffix bool      `json:"auto_suffix" gorm:"default:false"`
-	UrlSuffix  string    `json:"url_suffix" gorm:"size:200;default:''"`
-	BaseURL    string    `json:"base_url" gorm:"size:500;not null"`
-	APIKey     string    `json:"api_key" gorm:"size:500;not null"`
-	Models     string    `json:"models" gorm:"type:text"` // JSON 数组 [ModelEntry, ...]
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID                uint      `json:"id" gorm:"primaryKey"`
+	Name              string    `json:"name" gorm:"size:100;not null"`
+	AutoSuffix        bool      `json:"auto_suffix" gorm:"default:false"`
+	UrlSuffix         string    `json:"url_suffix" gorm:"size:200;default:''"`
+	BaseURL           string    `json:"base_url" gorm:"size:500;not null"`
+	APIKey            string    `json:"api_key" gorm:"size:500;not null"`
+	Models            string    `json:"models" gorm:"type:text"` // JSON 数组 [ModelEntry, ...]
+	EnableExtraParams bool      `json:"enable_extra_params" gorm:"default:true"` // 是否启用扩展参数
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 // MaskAPIKey 返回脱敏后的 API Key，只显示前4位和后4位

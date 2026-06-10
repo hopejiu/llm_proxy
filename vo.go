@@ -10,41 +10,45 @@ import (
 // ========== Provider VO ==========
 
 type ProviderVO struct {
-	ID          uint   `json:"id"`
-	Name        string `json:"name"`
-	AutoSuffix  bool   `json:"auto_suffix"`
-	UrlSuffix   string `json:"url_suffix"`
-	BaseURL     string `json:"base_url"`
-	APIKey      string `json:"api_key"`
-	Models      string `json:"models"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	ID                uint   `json:"id"`
+	Name              string `json:"name"`
+	AutoSuffix        bool   `json:"auto_suffix"`
+	UrlSuffix         string `json:"url_suffix"`
+	BaseURL           string `json:"base_url"`
+	APIKey            string `json:"api_key"`
+	Models            string `json:"models"`
+	EnableExtraParams bool   `json:"enable_extra_params"`
+	CreatedAt         string `json:"created_at"`
+	UpdatedAt         string `json:"updated_at"`
 }
 
 type ProviderCreateVO struct {
-	Name        string `json:"name"`
-	AutoSuffix  bool   `json:"auto_suffix"`
-	UrlSuffix   string `json:"url_suffix"`
-	BaseURL     string `json:"base_url"`
-	APIKey      string `json:"api_key"`
-	Models      string `json:"models"`
+	Name              string `json:"name"`
+	AutoSuffix        bool   `json:"auto_suffix"`
+	UrlSuffix         string `json:"url_suffix"`
+	BaseURL           string `json:"base_url"`
+	APIKey            string `json:"api_key"`
+	Models            string `json:"models"`
+	EnableExtraParams bool   `json:"enable_extra_params"`
 }
 
 type ProviderUpdateVO struct {
-	Name        string `json:"name"`
-	AutoSuffix  bool   `json:"auto_suffix"`
-	UrlSuffix   string `json:"url_suffix"`
-	BaseURL     string `json:"base_url"`
-	APIKey      string `json:"api_key"`
-	Models      string `json:"models"`
+	Name              string `json:"name"`
+	AutoSuffix        bool   `json:"auto_suffix"`
+	UrlSuffix         string `json:"url_suffix"`
+	BaseURL           string `json:"base_url"`
+	APIKey            string `json:"api_key"`
+	Models            string `json:"models"`
+	EnableExtraParams bool   `json:"enable_extra_params"`
 }
 
 func providerToVO(p *model.ProviderConfig) ProviderVO {
 	return ProviderVO{
 		ID: p.ID, Name: p.Name, AutoSuffix: p.AutoSuffix, UrlSuffix: p.UrlSuffix,
 		BaseURL: p.BaseURL, APIKey: p.APIKey, Models: p.Models,
-		CreatedAt: p.CreatedAt.Format("2006-01-02 15:04:05"),
-		UpdatedAt: p.UpdatedAt.Format("2006-01-02 15:04:05"),
+		EnableExtraParams: p.EnableExtraParams,
+		CreatedAt:         p.CreatedAt.Format("2006-01-02 15:04:05"),
+		UpdatedAt:         p.UpdatedAt.Format("2006-01-02 15:04:05"),
 	}
 }
 
@@ -60,6 +64,7 @@ func createVOToModel(data ProviderCreateVO) *model.ProviderConfig {
 	return &model.ProviderConfig{
 		Name: data.Name, AutoSuffix: data.AutoSuffix, UrlSuffix: data.UrlSuffix,
 		BaseURL: data.BaseURL, APIKey: data.APIKey, Models: data.Models,
+		EnableExtraParams: data.EnableExtraParams,
 	}
 }
 
@@ -67,6 +72,7 @@ func updateVOToModel(id uint, data ProviderUpdateVO) *model.ProviderConfig {
 	return &model.ProviderConfig{
 		ID: id, Name: data.Name, AutoSuffix: data.AutoSuffix, UrlSuffix: data.UrlSuffix,
 		BaseURL: data.BaseURL, APIKey: data.APIKey, Models: data.Models,
+		EnableExtraParams: data.EnableExtraParams,
 	}
 }
 
