@@ -263,6 +263,7 @@ export class ProviderCreateVO {
     "api_key": string;
     "models": string;
     "enable_extra_params": boolean;
+    "auto_fix_thinking": boolean;
 
     /** Creates a new ProviderCreateVO instance. */
     constructor($$source: Partial<ProviderCreateVO> = {}) {
@@ -287,6 +288,9 @@ export class ProviderCreateVO {
         if (!("enable_extra_params" in $$source)) {
             this["enable_extra_params"] = false;
         }
+        if (!("auto_fix_thinking" in $$source)) {
+            this["auto_fix_thinking"] = false;
+        }
 
         Object.assign(this, $$source);
     }
@@ -308,6 +312,7 @@ export class ProviderUpdateVO {
     "api_key": string;
     "models": string;
     "enable_extra_params": boolean;
+    "auto_fix_thinking": boolean;
 
     /** Creates a new ProviderUpdateVO instance. */
     constructor($$source: Partial<ProviderUpdateVO> = {}) {
@@ -332,6 +337,9 @@ export class ProviderUpdateVO {
         if (!("enable_extra_params" in $$source)) {
             this["enable_extra_params"] = false;
         }
+        if (!("auto_fix_thinking" in $$source)) {
+            this["auto_fix_thinking"] = false;
+        }
 
         Object.assign(this, $$source);
     }
@@ -354,6 +362,7 @@ export class ProviderVO {
     "api_key": string;
     "models": string;
     "enable_extra_params": boolean;
+    "auto_fix_thinking": boolean;
     "created_at": string;
     "updated_at": string;
 
@@ -382,6 +391,9 @@ export class ProviderVO {
         }
         if (!("enable_extra_params" in $$source)) {
             this["enable_extra_params"] = false;
+        }
+        if (!("auto_fix_thinking" in $$source)) {
+            this["auto_fix_thinking"] = false;
         }
         if (!("created_at" in $$source)) {
             this["created_at"] = "";

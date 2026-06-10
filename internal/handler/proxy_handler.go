@@ -4,15 +4,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
+	"net/http"
+	"strings"
+	"time"
+
 	"github.com/wanglejiu/llm-proxy/internal/config"
 	"github.com/wanglejiu/llm-proxy/internal/converter"
 	"github.com/wanglejiu/llm-proxy/internal/model"
 	"github.com/wanglejiu/llm-proxy/internal/repository"
 	"github.com/wanglejiu/llm-proxy/internal/service"
-	"log/slog"
-	"net/http"
-	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -77,6 +78,7 @@ func (h *ProxyHandler) handleNormalRequest(c *gin.Context, body []byte, startTim
 // handleNormalRequestOpenAI 处理 OpenAI 类型 Provider 的非流式请求（直接透传）
 func (h *ProxyHandler) handleNormalRequestOpenAI(c *gin.Context, body []byte, provider model.ProviderConfig, startTime time.Time) {
 	body = h.PrepareRequestBody(body, provider)
+	body = h.FixThinkingChain(body, sessionIDFromContext(c.Request.Context()), provider)
 	reqLog := h.CreateRequestLog(provider, string(body))
 	sessionID := sessionIDFromContext(c.Request.Context())
 
@@ -149,8 +151,6 @@ func (h *ProxyHandler) handleNormalRequestOpenAI(c *gin.Context, body []byte, pr
 	c.String(http.StatusOK, string(respBody))
 }
 
-
-
 // handleStreamRequest 处理流式请求
 func (h *ProxyHandler) handleStreamRequest(c *gin.Context, body []byte, startTime time.Time) {
 	var reqInfo struct {
@@ -179,13 +179,15 @@ func (h *ProxyHandler) handleStreamRequest(c *gin.Context, body []byte, startTim
 // handleStreamRequestOpenAI 处理 OpenAI 类型 Provider 的流式请求（直接透传）
 func (h *ProxyHandler) handleStreamRequestOpenAI(c *gin.Context, body []byte, provider model.ProviderConfig, startTime time.Time) {
 	body = h.PrepareRequestBody(body, provider)
+	body = h.FixThinkingChain(body, sessionIDFromContext(c.Request.Context()), provider)
 	reqLog := h.CreateRequestLog(provider, string(body))
 	requestID := requestIDFromContext(c.Request.Context())
 	sessionID := sessionIDFromContext(c.Request.Context())
 	tracker := h.tracker
 
 	var receivedDone bool
-	var sessionInjected bool // 防重复注入：同一请求只注入一次标记
+	var sessionInjected bool                             // 防重复注入：同一请求只注入一次标记
+	var contentBuilder, reasoningBuilder strings.Builder // 流式累积纯文本
 	responseBuilder, tokens, lastErr := h.ExecuteStreamWithRetry(
 		c.Request.Context(),
 		provider,
@@ -204,7 +206,7 @@ func (h *ProxyHandler) handleStreamRequestOpenAI(c *gin.Context, body []byte, pr
 					return true
 				}
 
-				// 普通 data 行：透写 + 提取 tracker 内容
+				// 普通 data 行：透写 + 提取 tracker 内容 + 累积纯文本
 				c.Writer.Write([]byte(line + "\n\n"))
 				c.Writer.Flush()
 
@@ -212,9 +214,11 @@ func (h *ProxyHandler) handleStreamRequestOpenAI(c *gin.Context, body []byte, pr
 				if json.Unmarshal([]byte(data), &chunk) == nil {
 					deltaResult := converter.ExtractDeltaFromChunk(chunk)
 					if deltaResult.Content != "" {
+						contentBuilder.WriteString(deltaResult.Content)
 						tracker.AppendResponse(requestID, deltaResult.Content)
 					}
 					if deltaResult.ReasoningContent != "" {
+						reasoningBuilder.WriteString(deltaResult.ReasoningContent)
 						tracker.AppendResponse(requestID, deltaResult.ReasoningContent)
 					}
 					if len(deltaResult.ToolCallsDelta) > 0 {
@@ -245,9 +249,11 @@ func (h *ProxyHandler) handleStreamRequestOpenAI(c *gin.Context, body []byte, pr
 		SafeWriteSSE(c, "data: [DONE]\n\n")
 	}
 
-	reqLog.ResponseBody = responseBuilder.String()
-	reqLog.ResponseContent = parseStreamResponse(responseBuilder.String())
-	// 流式注入的标记在 processor 中已写入客户端，但 responseBuilder 捕获的是原始行
+	// 归一化：将 SSE 流式响应转换为标准 OpenAI JSON 格式（与非流式一致）
+	reqLog.ResponseBody = NormalizeStreamResponseBody(responseBuilder.String())
+	reqLog.ResponseContent = contentBuilder.String()   // 纯文本
+	reqLog.ThinkingContent = reasoningBuilder.String() // 纯文本
+	// 流式注入的标记在 processor 中已写入客户端，但 contentBuilder 捕获的是原始内容
 	// 此处补回 sessionContent，使数据库记录与实际客户端接收一致
 	if sessionInjected {
 		reqLog.ResponseContent += service.BuildSessionSuffix(sessionID)

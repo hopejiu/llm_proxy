@@ -148,8 +148,7 @@ export default function RealtimePage() {
   }
 
   function formatProtocol(protocol: string): string {
-    const map: Record<string, string> = { openai: "OpenAI", anthropic: "Anthropic", ollama: "Ollama" };
-    return map[protocol] || protocol;
+    return protocol === "openai" ? "OpenAI" : protocol;
   }
 
   function prettyJson(s: string): string {

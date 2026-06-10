@@ -63,7 +63,7 @@ func (r *ProviderRepository) GetByIDs(ids []uint) (map[uint]model.ProviderConfig
 
 // Update 更新Provider（只更新业务字段，不覆盖 created_at）
 func (r *ProviderRepository) Update(provider *model.ProviderConfig) error {
-	return r.dbManager.GetDB().Model(provider).Select("name", "auto_suffix", "url_suffix", "base_url", "api_key", "models", "enable_extra_params", "updated_at").Updates(provider).Error
+	return r.dbManager.GetDB().Model(provider).Select("name", "auto_suffix", "url_suffix", "base_url", "api_key", "models", "enable_extra_params", "auto_fix_thinking", "updated_at").Updates(provider).Error
 }
 
 // Delete 删除Provider（先将关联日志的ProviderID置为DeletedProviderID，再删除Provider）

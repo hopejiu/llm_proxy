@@ -62,6 +62,24 @@ type CostRow struct {
 	CachedTokens int
 }
 
+// ThinkingEntry 思维链历史条目（用于思维链修复）
+type ThinkingEntry struct {
+	ResponseContent string
+	ThinkingContent string
+}
+
+// GetThinkingHistory 获取指定会话的思维链历史（用于思维链修复）
+// 只返回有 thinking_content 的成功记录，按创建时间升序排列
+func (r *RequestLogRepository) GetThinkingHistory(sessionID uint) []ThinkingEntry {
+	var entries []ThinkingEntry
+	r.dbManager.GetDB().Model(&model.RequestLog{}).
+		Select("response_content, thinking_content").
+		Where("session_id = ? AND thinking_content != '' AND thinking_content IS NOT NULL AND status = 'success'", sessionID).
+		Order("created_at asc").
+		Find(&entries)
+	return entries
+}
+
 // GetByID 根据ID获取日志（含完整大字段，用于查看详情）
 func (r *RequestLogRepository) GetByID(id uint) (*model.RequestLog, error) {
 	var requestLog model.RequestLog

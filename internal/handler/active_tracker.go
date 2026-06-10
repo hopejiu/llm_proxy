@@ -8,9 +8,9 @@ import (
 
 // ActiveToolCall 活跃请求中的工具调用信息
 type ActiveToolCall struct {
-	ID        string `json:"id"`         // tool_call id
-	Name      string `json:"name"`       // function name
-	Arguments string `json:"arguments"`  // function arguments（逐步追加）
+	ID        string `json:"id"`        // tool_call id
+	Name      string `json:"name"`      // function name
+	Arguments string `json:"arguments"` // function arguments（逐步追加）
 }
 
 // ActiveRequest 正在进行的请求信息
@@ -24,14 +24,14 @@ type ActiveRequest struct {
 	ToolCalls       []ActiveToolCall `json:"tool_calls"`       // 实时工具调用列表
 	Status          string           `json:"status"`           // "pending" | "streaming" | "error"
 	StartTime       time.Time        `json:"start_time"`
-	Protocol        string           `json:"protocol"` // "openai" | "anthropic" | "ollama"
+	Protocol        string           `json:"protocol"` // "openai"
 	ClientIP        string           `json:"client_ip"`
 }
 
 // ActiveTrackerChange 追踪器变更事件，用于回调通知
 type ActiveTrackerChange struct {
-	Type      string        `json:"type"`      // "add" | "update" | "remove"
-	RequestID string        `json:"request_id"`
+	Type      string         `json:"type"` // "add" | "update" | "remove"
+	RequestID string         `json:"request_id"`
 	Data      *ActiveRequest `json:"data,omitempty"`
 }
 
@@ -40,12 +40,12 @@ type ChangeCallback func(change ActiveTrackerChange)
 
 // ActiveRequestTracker 活跃请求追踪器
 type ActiveRequestTracker struct {
-	mu              sync.RWMutex
-	requests        map[string]*ActiveRequest
-	onChange        ChangeCallback
-	debounceWindow  time.Duration
-	debounceTimers  map[string]time.Time // requestID → last notify time
-	debounceMu      sync.Mutex           // protects debounceTimers
+	mu             sync.RWMutex
+	requests       map[string]*ActiveRequest
+	onChange       ChangeCallback
+	debounceWindow time.Duration
+	debounceTimers map[string]time.Time // requestID → last notify time
+	debounceMu     sync.Mutex           // protects debounceTimers
 }
 
 // NewActiveRequestTracker 创建活跃请求追踪器实例

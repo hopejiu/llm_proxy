@@ -28,6 +28,7 @@ interface ProviderForm {
   url_suffix: string;
   models: ModelEntry[];
   enable_extra_params: boolean;
+  auto_fix_thinking: boolean;
 }
 
 interface FormErrors {
@@ -44,6 +45,7 @@ const emptyForm: ProviderForm = {
   auto_suffix: false, url_suffix: "v1/chat/completions",
   models: [],
   enable_extra_params: true,
+  auto_fix_thinking: false,
 };
 
 /* ---------- helpers ---------- */
@@ -336,6 +338,7 @@ export default function ProvidersPage() {
       url_suffix: p.url_suffix || "",
       models,
       enable_extra_params: p.enable_extra_params !== false,
+      auto_fix_thinking: p.auto_fix_thinking === true,
     });
     setEditingId(p.id);
     setErrors({});
@@ -717,6 +720,23 @@ export default function ProvidersPage() {
             </label>
             <p className="form-helper mt-1">
               关闭后，所有模型的扩展参数（extra_params）将不会发送到上游 API，已有配置保留不变。
+            </p>
+          </div>
+
+          {/* Auto fix thinking toggle */}
+          <div>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.auto_fix_thinking}
+                onChange={(e) => handleFieldChange("auto_fix_thinking", e.target.checked)}
+                className="w-4 h-4 rounded border-[#EDE9FE] text-brand-600 focus:ring-brand-600/20"
+              />
+              <span className="text-sm text-[#6B6580] cursor-pointer">自动修复思维链缺失</span>
+            </label>
+            <p className="form-helper mt-1">
+              开启后，代理将自动为历史 assistant 消息补全 <code className="text-brand-600 bg-brand-50 px-1 rounded">reasoning_content</code>，
+              解决 DeepSeek 等模型在工具调用时因缺失思维链导致的 400 错误。
             </p>
           </div>
 

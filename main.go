@@ -79,17 +79,13 @@ func main() {
 
 	proxyHandler := handler.NewProxyHandler(proxyService, requestLogRepo, cfg, tracker)
 	proxyHandler.WithSessionService(sessionSvc)
-	anthropicHandler := handler.NewAnthropicHandler(proxyService, requestLogRepo, cfg, tracker)
-	anthropicHandler.WithSessionService(sessionSvc)
-	ollamaHandler := handler.NewOllamaHandler(proxyService, requestLogRepo, cfg, tracker)
-	ollamaHandler.WithSessionService(sessionSvc)
 
 	logReader := logger.NewLogReader(logFilePath)
 
 	providerBindingService := NewProviderService(providerSvc, cfg, proxyService)
 	statsBindingService := NewStatsService(statsSvc, logSvc, providerSvc, tracker)
 	statsBindingService.WithSessionRepo(sessionRepo)
-	appBindingService := NewAppService(cfg, dbManager, proxyHandler, anthropicHandler, ollamaHandler, logReader, dbFallbackMsg)
+	appBindingService := NewAppService(cfg, dbManager, proxyHandler, logReader, dbFallbackMsg)
 	cleanupWrapper := NewCleanupServiceWrapper(cleanupSvc)
 
 	slog.Info("正在启动 Wails 窗口...")
@@ -97,7 +93,7 @@ func main() {
 	// 4. 创建 Wails 应用 & 窗口
 	app := application.New(application.Options{
 		Name:        "LLM Proxy",
-		Description: "LLM API 代理工具 - 提供 OpenAI/Anthropic/Ollama 兼容接口",
+		Description: "LLM API 代理工具 - 提供 OpenAI 兼容接口",
 		Services: []application.Service{
 			application.NewService(providerBindingService),
 			application.NewService(statsBindingService),

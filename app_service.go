@@ -26,15 +26,13 @@ import (
 
 // AppService Wails 绑定服务：代理控制、配置、系统信息
 type AppService struct {
-	cfg              *config.Config
-	dbManager        *repository.DBManager
-	proxyHandler     *handler.ProxyHandler
-	anthropicHandler *handler.AnthropicHandler
-	ollamaHandler    *handler.OllamaHandler
-	logReader        *logger.LogReader
-	dbFallbackMsg    string
-	mainWindow       *application.WebviewWindow
-	app              *application.App
+	cfg           *config.Config
+	dbManager     *repository.DBManager
+	proxyHandler  *handler.ProxyHandler
+	logReader     *logger.LogReader
+	dbFallbackMsg string
+	mainWindow    *application.WebviewWindow
+	app           *application.App
 
 	proxyState proxyState
 	ctx        context.Context
@@ -51,20 +49,16 @@ func NewAppService(
 	cfg *config.Config,
 	dbManager *repository.DBManager,
 	proxyHandler *handler.ProxyHandler,
-	anthropicHandler *handler.AnthropicHandler,
-	ollamaHandler *handler.OllamaHandler,
 	logReader *logger.LogReader,
 	dbFallbackMsg string,
 ) *AppService {
 	return &AppService{
-		cfg:              cfg,
-		dbManager:        dbManager,
-		proxyHandler:     proxyHandler,
-		anthropicHandler: anthropicHandler,
-		ollamaHandler:    ollamaHandler,
-		logReader:        logReader,
-		dbFallbackMsg:    dbFallbackMsg,
-		proxyState:       proxyState{status: "stopped"},
+		cfg:           cfg,
+		dbManager:     dbManager,
+		proxyHandler:  proxyHandler,
+		logReader:     logReader,
+		dbFallbackMsg: dbFallbackMsg,
+		proxyState:    proxyState{status: "stopped"},
 	}
 }
 
@@ -158,7 +152,7 @@ func (s *AppService) startProxyServer(resultCh chan<- error) {
 	}
 	ln.Close()
 
-	proxyEngine := router.SetupProxy(s.proxyHandler, s.anthropicHandler, s.ollamaHandler)
+	proxyEngine := router.SetupProxy(s.proxyHandler)
 
 	server := &http.Server{
 		Addr:    ":" + proxyPort,

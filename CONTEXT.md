@@ -56,6 +56,14 @@ _避免_: session tag, session token, 会话标识
 按会话聚合的指标，包含请求次数、token 用量和成本。通过独立表 `chat_sessions` 持久化，每次请求结束后按 session_id 重新聚合 `request_logs` 计算。
 _避免_: 会话分析, session analytics
 
+**思维链修复 (Thinking Chain Fix)**:
+在转发请求前，自动为 messages 中的 assistant 消息补全缺失的 `reasoning_content` 字段。该功能由 Provider 级别的 `AutoFixThinking` 开关控制，代理服务完全接管思维链维护，一律从 request_logs 中实时聚合历史 reasoning_content 并按 content 匹配注入。
+_避免_: 思维链拼接, thinking injection, reasoning patch
+
+**工具调用 (Tool Call)**:
+LLM 响应中要求客户端执行外部操作的指令，遵循 OpenAI `tool_calls` 格式：`{id, type, function: {name, arguments}}`。`arguments` 是 JSON 字符串（非对象），需 parse 后才可读。实时面板从 `ActiveRequest.tool_calls` 读取；历史日志从 `response_body` 的 `choices[0].message.tool_calls` 中解析。后端在流式写入时将 SSE 流归一化为标准 OpenAI JSON，使流式与非流式记录格式一致。
+_避免_: 函数调用, function call, tool use
+
 ## 示例对话
 
 **开发者**: "用户添加了一个新的 Provider，绑定服务应该调用业务服务创建记录，然后刷新前端表格。"

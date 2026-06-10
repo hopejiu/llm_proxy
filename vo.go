@@ -18,6 +18,7 @@ type ProviderVO struct {
 	APIKey            string `json:"api_key"`
 	Models            string `json:"models"`
 	EnableExtraParams bool   `json:"enable_extra_params"`
+	AutoFixThinking   bool   `json:"auto_fix_thinking"`
 	CreatedAt         string `json:"created_at"`
 	UpdatedAt         string `json:"updated_at"`
 }
@@ -30,6 +31,7 @@ type ProviderCreateVO struct {
 	APIKey            string `json:"api_key"`
 	Models            string `json:"models"`
 	EnableExtraParams bool   `json:"enable_extra_params"`
+	AutoFixThinking   bool   `json:"auto_fix_thinking"`
 }
 
 type ProviderUpdateVO struct {
@@ -40,15 +42,16 @@ type ProviderUpdateVO struct {
 	APIKey            string `json:"api_key"`
 	Models            string `json:"models"`
 	EnableExtraParams bool   `json:"enable_extra_params"`
+	AutoFixThinking   bool   `json:"auto_fix_thinking"`
 }
 
 func providerToVO(p *model.ProviderConfig) ProviderVO {
 	return ProviderVO{
 		ID: p.ID, Name: p.Name, AutoSuffix: p.AutoSuffix, UrlSuffix: p.UrlSuffix,
 		BaseURL: p.BaseURL, APIKey: p.APIKey, Models: p.Models,
-		EnableExtraParams: p.EnableExtraParams,
-		CreatedAt:         p.CreatedAt.Format("2006-01-02 15:04:05"),
-		UpdatedAt:         p.UpdatedAt.Format("2006-01-02 15:04:05"),
+		EnableExtraParams: p.EnableExtraParams, AutoFixThinking: p.AutoFixThinking,
+		CreatedAt: p.CreatedAt.Format("2006-01-02 15:04:05"),
+		UpdatedAt: p.UpdatedAt.Format("2006-01-02 15:04:05"),
 	}
 }
 
@@ -64,7 +67,7 @@ func createVOToModel(data ProviderCreateVO) *model.ProviderConfig {
 	return &model.ProviderConfig{
 		Name: data.Name, AutoSuffix: data.AutoSuffix, UrlSuffix: data.UrlSuffix,
 		BaseURL: data.BaseURL, APIKey: data.APIKey, Models: data.Models,
-		EnableExtraParams: data.EnableExtraParams,
+		EnableExtraParams: data.EnableExtraParams, AutoFixThinking: data.AutoFixThinking,
 	}
 }
 
@@ -72,7 +75,7 @@ func updateVOToModel(id uint, data ProviderUpdateVO) *model.ProviderConfig {
 	return &model.ProviderConfig{
 		ID: id, Name: data.Name, AutoSuffix: data.AutoSuffix, UrlSuffix: data.UrlSuffix,
 		BaseURL: data.BaseURL, APIKey: data.APIKey, Models: data.Models,
-		EnableExtraParams: data.EnableExtraParams,
+		EnableExtraParams: data.EnableExtraParams, AutoFixThinking: data.AutoFixThinking,
 	}
 }
 

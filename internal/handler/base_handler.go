@@ -6,11 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/wanglejiu/llm-proxy/internal/config"
-	"github.com/wanglejiu/llm-proxy/internal/converter"
-	"github.com/wanglejiu/llm-proxy/internal/model"
-	"github.com/wanglejiu/llm-proxy/internal/repository"
-	"github.com/wanglejiu/llm-proxy/internal/service"
 	"io"
 	"log/slog"
 	"net/http"
@@ -18,6 +13,12 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/wanglejiu/llm-proxy/internal/config"
+	"github.com/wanglejiu/llm-proxy/internal/converter"
+	"github.com/wanglejiu/llm-proxy/internal/model"
+	"github.com/wanglejiu/llm-proxy/internal/repository"
+	"github.com/wanglejiu/llm-proxy/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -29,7 +30,7 @@ type requestIDKey struct{}
 type ProxyRequestInfo struct {
 	Model    string
 	Stream   bool
-	Protocol string // "openai" | "anthropic" | "ollama"
+	Protocol string // "openai"
 }
 
 // ParseRequestFunc 解析请求体的回调，返回请求信息或错误
@@ -383,7 +384,7 @@ func (h *BaseHandler) ReadBody(c *gin.Context) ([]byte, error) {
 }
 
 // maxBodySize 请求体/响应体存储的最大字节数（超过截断）
-const maxBodySize = 64 * 1024 // 64KB
+const maxBodySize = 16 * 1024 * 1024 // 16MB
 
 // sanitizeBody 清理请求体/响应体，确保内容为合法 UTF-8
 func sanitizeBody(body string) string {
@@ -659,8 +660,9 @@ func (h *BaseHandler) detectStreamError(data map[string]interface{}) *StreamErro
 	return nil
 }
 
-// parseStreamResponse 返回格式化的可读 JSON
-func parseStreamResponse(sseData string) string {
+// NormalizeStreamResponseBody 将 SSE 流式 response_body 归一化为标准 OpenAI JSON 格式
+// 输出格式与非流式响应一致：choices[0].message.{content,tool_calls} + usage
+func NormalizeStreamResponseBody(sseData string) string {
 	var contentBuilder strings.Builder
 	var reasoningBuilder strings.Builder
 	var lastChunk map[string]interface{}
@@ -685,7 +687,57 @@ func parseStreamResponse(sseData string) string {
 		parseToolCallsFromChunk(chunk, toolCalls)
 	}
 
-	return buildParsedResult(contentBuilder, reasoningBuilder, toolCalls, lastChunk)
+	return buildNormalizedResponse(contentBuilder, reasoningBuilder, toolCalls, lastChunk)
+}
+
+// buildNormalizedResponse 构建 OpenAI 兼容格式的标准 JSON 响应
+func buildNormalizedResponse(contentBuilder, reasoningBuilder strings.Builder, toolCalls map[int]map[string]interface{}, lastChunk map[string]interface{}) string {
+	message := map[string]interface{}{
+		"content": contentBuilder.String(),
+	}
+	if reasoningBuilder.Len() > 0 {
+		message["reasoning_content"] = reasoningBuilder.String()
+	}
+	if len(toolCalls) > 0 {
+		indices := make([]int, 0, len(toolCalls))
+		for idx := range toolCalls {
+			indices = append(indices, idx)
+		}
+		sort.Ints(indices)
+		tcArray := make([]map[string]interface{}, len(indices))
+		for i, idx := range indices {
+			tcArray[i] = toolCalls[idx]
+		}
+		message["tool_calls"] = tcArray
+	}
+
+	result := map[string]interface{}{
+		"choices": []map[string]interface{}{
+			{
+				"index":   0,
+				"message": message,
+			},
+		},
+	}
+	if lastChunk != nil {
+		if usage, ok := lastChunk["usage"].(map[string]interface{}); ok {
+			result["usage"] = usage
+		}
+		if m, ok := lastChunk["model"].(string); ok {
+			result["model"] = m
+		}
+	}
+	jsonBytes, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		// fallback: 返回最简结构
+		fallback := map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{"index": 0, "message": map[string]interface{}{"content": contentBuilder.String()}},
+			},
+		}
+		jsonBytes, _ = json.MarshalIndent(fallback, "", "  ")
+	}
+	return string(jsonBytes)
 }
 
 // parseContentFromChunk 从 chunk 中提取文本和推理内容
@@ -763,41 +815,6 @@ func parseToolCallsFromChunk(chunk map[string]interface{}, toolCalls map[int]map
 			}
 		}
 	}
-}
-
-// buildParsedResult 构建格式化的解析结果
-func buildParsedResult(contentBuilder, reasoningBuilder strings.Builder, toolCalls map[int]map[string]interface{}, lastChunk map[string]interface{}) string {
-	result := map[string]interface{}{
-		"content": contentBuilder.String(),
-	}
-	if reasoningBuilder.Len() > 0 {
-		result["reasoning_content"] = reasoningBuilder.String()
-	}
-	if len(toolCalls) > 0 {
-		indices := make([]int, 0, len(toolCalls))
-		for idx := range toolCalls {
-			indices = append(indices, idx)
-		}
-		sort.Ints(indices)
-		tcArray := make([]map[string]interface{}, len(indices))
-		for i, idx := range indices {
-			tcArray[i] = toolCalls[idx]
-		}
-		result["tool_calls"] = tcArray
-	}
-	if lastChunk != nil {
-		if usage, ok := lastChunk["usage"].(map[string]interface{}); ok {
-			result["usage"] = usage
-		}
-		if m, ok := lastChunk["model"].(string); ok {
-			result["model"] = m
-		}
-	}
-	jsonBytes, err := json.MarshalIndent(result, "", "  ")
-	if err != nil {
-		return contentBuilder.String()
-	}
-	return string(jsonBytes)
 }
 
 // SafeWriteSSE 写入 SSE 数据

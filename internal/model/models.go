@@ -27,8 +27,9 @@ type ProviderConfig struct {
 	UrlSuffix         string    `json:"url_suffix" gorm:"size:200;default:''"`
 	BaseURL           string    `json:"base_url" gorm:"size:500;not null"`
 	APIKey            string    `json:"api_key" gorm:"size:500;not null"`
-	Models            string    `json:"models" gorm:"type:text"` // JSON 数组 [ModelEntry, ...]
+	Models            string    `json:"models" gorm:"type:text"`                 // JSON 数组 [ModelEntry, ...]
 	EnableExtraParams bool      `json:"enable_extra_params" gorm:"default:true"` // 是否启用扩展参数
+	AutoFixThinking   bool      `json:"auto_fix_thinking" gorm:"default:false"`  // 自动修复思维链缺失
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
 }
@@ -147,26 +148,26 @@ type RequestLog struct {
 	InputTokens     int            `json:"input_tokens"`
 	OutputTokens    int            `json:"output_tokens"`
 	TotalTokens     int            `json:"total_tokens"`
-	CachedTokens    int            `json:"cached_tokens"`                                           // 缓存token数
-	RequestBody     string         `json:"request_body" gorm:"type:longtext"`                       // 完整请求JSON
-	ResponseBody    string         `json:"response_body" gorm:"type:longtext"`                      // 完整响应JSON
-	ResponseContent string         `json:"response_content" gorm:"type:longtext"`                   // 解析后的可读响应内容（stream类型拼接后的完整内容）
-	ThinkingContent string         `json:"thinking_content" gorm:"type:longtext"`                   // 推理/thinking内容
-	Status          string         `json:"status" gorm:"size:20;index:idx_created_at_status"`       // success/error
+	CachedTokens    int            `json:"cached_tokens"`                                     // 缓存token数
+	RequestBody     string         `json:"request_body" gorm:"type:longtext"`                 // 完整请求JSON
+	ResponseBody    string         `json:"response_body" gorm:"type:longtext"`                // 完整响应JSON
+	ResponseContent string         `json:"response_content" gorm:"type:longtext"`             // 解析后的可读响应内容（stream类型拼接后的完整内容）
+	ThinkingContent string         `json:"thinking_content" gorm:"type:longtext"`             // 推理/thinking内容
+	Status          string         `json:"status" gorm:"size:20;index:idx_created_at_status"` // success/error
 	ErrorMessage    string         `json:"error_message" gorm:"size:1000"`
-	Duration        int64          `json:"duration"`                                                   // 请求耗时(毫秒)
-	Aggregated      bool           `json:"aggregated" gorm:"default:false;index:idx_aggregated"`       // 是否已汇总到hourly_stats
-	SessionID       *uint          `json:"session_id" gorm:"index:idx_session_id;default:null"`        // 所属会话ID（为NULL表示无会话）
+	Duration        int64          `json:"duration"`                                             // 请求耗时(毫秒)
+	Aggregated      bool           `json:"aggregated" gorm:"default:false;index:idx_aggregated"` // 是否已汇总到hourly_stats
+	SessionID       *uint          `json:"session_id" gorm:"index:idx_session_id;default:null"`  // 所属会话ID（为NULL表示无会话）
 	CreatedAt       time.Time      `json:"created_at" gorm:"index:idx_created_at;index:idx_created_at_status"`
 }
 
 // ChatSession 会话统计
 type ChatSession struct {
 	ID           uint      `json:"id" gorm:"primaryKey"`
-	Models       string    `json:"models" gorm:"type:text"`                    // JSON数组，该会话使用过的模型名（去重）
-	RequestCount int64     `json:"request_count" gorm:"default:0"`             // 累计请求次数
-	TotalTokens  int64     `json:"total_tokens" gorm:"default:0"`              // 累计总token
-	TotalCost    float64   `json:"total_cost" gorm:"default:0"`                // 累计总成本（元）
+	Models       string    `json:"models" gorm:"type:text"`        // JSON数组，该会话使用过的模型名（去重）
+	RequestCount int64     `json:"request_count" gorm:"default:0"` // 累计请求次数
+	TotalTokens  int64     `json:"total_tokens" gorm:"default:0"`  // 累计总token
+	TotalCost    float64   `json:"total_cost" gorm:"default:0"`    // 累计总成本（元）
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }

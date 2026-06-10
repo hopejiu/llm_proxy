@@ -30,6 +30,9 @@ export default function SessionsPage() {
 
   const autoRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [detailRefreshing, setDetailRefreshing] = useState(false);
+  const detailAutoRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   const pricingMap = useMemo(() => buildPricingMap(providers), [providers]);
 
@@ -62,6 +65,16 @@ export default function SessionsPage() {
     setRefreshing(false);
   }, [page, searchID]);
 
+  const refreshDetail = useCallback(async () => {
+    if (selectedSession === null) return;
+    setDetailRefreshing(true);
+    try {
+      const data = await StatsAPI.getSessionRequests(selectedSession);
+      setSessionRequests(data || []);
+    } catch {}
+    setDetailRefreshing(false);
+  }, [selectedSession]);
+
   // 自动刷新：每 2s 刷新，会话详情页不刷新
   useEffect(() => {
     if (selectedSession) return;
@@ -80,6 +93,17 @@ export default function SessionsPage() {
       fetchSessions(page, searchID);
     }
   }, [page, fetchSessions, selectedSession]);
+
+  // 会话详情自动刷新：每 2s
+  useEffect(() => {
+    if (selectedSession === null) return;
+    detailAutoRef.current = setInterval(() => {
+      StatsAPI.getSessionRequests(selectedSession).then(data => {
+        setSessionRequests(data || []);
+      }).catch(() => {});
+    }, 2000);
+    return () => { if (detailAutoRef.current) clearInterval(detailAutoRef.current); };
+  }, [selectedSession]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -118,7 +142,14 @@ export default function SessionsPage() {
     try { return JSON.parse(json); } catch { return json ? [json] : []; }
   };
 
-  // Enrich session requests with _cost (复用 StatsPage 的计算逻辑)
+  const toggleSort = () => setSortOrder(o => o === "desc" ? "asc" : "desc");
+
+  const sortedSessions = useMemo(() => {
+    return [...sessions].sort((a, b) => {
+      const cmp = a.updated_at.localeCompare(b.updated_at);
+      return sortOrder === "desc" ? -cmp : cmp;
+    });
+  }, [sessions, sortOrder]);
   const enrichedRequests = useMemo(() => sessionRequests.map((log: any) => {
     const prices = lookupLogPrices(pricingMap, log.provider_id, log.model);
     const usage = {
@@ -223,7 +254,12 @@ export default function SessionsPage() {
         )}
 
         <div className="bg-white rounded-xl border border-[#EDE9FE] p-5">
-          <h3 className="text-sm font-semibold mb-4">请求明细</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-semibold">请求明细</h3>
+            <button onClick={refreshDetail} disabled={detailRefreshing} className="btn-ghost p-1.5 disabled:opacity-50" title="刷新">
+              <svg className={`w-4 h-4 ${detailRefreshing ? "animate-spin" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+            </button>
+          </div>
           {requestsLoading ? (
             <div className="text-center py-8 text-sm text-[#6B6580]">加载中...</div>
           ) : (
@@ -296,12 +332,23 @@ export default function SessionsPage() {
                   <th className="text-right px-5 py-3 font-medium">总 Token</th>
                   <th className="text-right px-5 py-3 font-medium">总成本</th>
                   <th className="text-right px-5 py-3 font-medium">创建时间</th>
-                  <th className="text-right px-5 py-3 font-medium">最后更新</th>
+                  <th
+                    onClick={toggleSort}
+                    className="text-right px-5 py-3 font-medium cursor-pointer select-none hover:text-brand-600 transition-colors"
+                    title={`点击按时间${sortOrder === "desc" ? "升序" : "降序"}排列`}
+                  >
+                    <span className="inline-flex items-center gap-1 justify-end">
+                      最后更新
+                      <svg className={`w-3 h-3 transition-transform ${sortOrder === "desc" ? "" : "rotate-180"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </span>
+                  </th>
                   <th className="text-center px-5 py-3 font-medium">操作</th>
                 </tr>
               </thead>
               <tbody>
-                {sessions.map((s) => (
+                {sortedSessions.map((s) => (
                   <tr key={s.id} className="border-t border-[#F0EBF5] hover:bg-[#FAF5FF]/50 transition-colors">
                     <td className="px-5 py-3 font-semibold">#{s.id}</td>
                     <td className="px-5 py-3">

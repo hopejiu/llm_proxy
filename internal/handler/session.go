@@ -54,10 +54,6 @@ func InjectSessionMarkIntoResponse(respBody []byte, sessionID uint, protocol str
 	switch protocol {
 	case "openai":
 		injectIntoOpenAIResponse(data, suffix)
-	case "anthropic":
-		injectIntoAnthropicResponse(data, suffix)
-	case "ollama":
-		injectIntoOllamaResponse(data, suffix)
 	}
 
 	newBody, _ := json.Marshal(data)
@@ -75,7 +71,10 @@ func InjectSessionMarkIntoStreamContent(content string, sessionID uint) string {
 
 // WriteStreamSessionMark 在流式响应 [DONE] 前写入会话标记（统一模式）
 // 所有三种协议的流式 handler 复用此方法
-func WriteStreamSessionMark(c interface{ Write([]byte) (int, error); Flush() }, ctx context.Context, requestID string, sessionID uint, injected *bool) {
+func WriteStreamSessionMark(c interface {
+	Write([]byte) (int, error)
+	Flush()
+}, ctx context.Context, requestID string, sessionID uint, injected *bool) {
 	if *injected || sessionID == 0 || !isNewSession(ctx) {
 		return
 	}
@@ -113,40 +112,4 @@ func injectIntoOpenAIResponse(data map[string]interface{}, suffix string) {
 	}
 }
 
-// injectIntoAnthropicResponse 在 Anthropic 响应 content[0].text 末尾追加标记
-func injectIntoAnthropicResponse(data map[string]interface{}, suffix string) {
-	contentArr, ok := data["content"].([]interface{})
-	if !ok || len(contentArr) == 0 {
-		return
-	}
-	first, ok := contentArr[0].(map[string]interface{})
-	if !ok {
-		return
-	}
-	text, _ := first["text"].(string)
-	if service.HasSessionMark(text) {
-		return
-	}
-	if text != "" {
-		first["text"] = text + suffix
-	} else {
-		first["text"] = suffix
-	}
-}
-
-// injectIntoOllamaResponse 在 Ollama 响应 message.content 末尾追加标记
-func injectIntoOllamaResponse(data map[string]interface{}, suffix string) {
-	msg, ok := data["message"].(map[string]interface{})
-	if !ok {
-		return
-	}
-	content, _ := msg["content"].(string)
-	if service.HasSessionMark(content) {
-		return
-	}
-	if content != "" {
-		msg["content"] = content + suffix
-	} else {
-		msg["content"] = suffix
-	}
-}
+// injectIntoOllamaResponse removed - Ollama protocol no longer supported

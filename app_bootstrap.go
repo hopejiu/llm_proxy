@@ -123,6 +123,7 @@ func migrateDB(db *gorm.DB, cfg *config.Config) {
 	migrateHourlyStats(db, cfg)
 	migrateProviderConfigs(db, cfg)
 	migrateExtraParamsToggle(db, cfg)
+	migrateAutoFixThinking(db, cfg)
 	createModelIndexes(db)
 	slog.Info("数据库表初始化完成")
 }
@@ -161,6 +162,7 @@ func createSQLiteTablesIfNotExist(db *gorm.DB) {
 			alias TEXT,
 			extra_params TEXT,
 			enable_extra_params INTEGER DEFAULT 1,
+			auto_fix_thinking INTEGER DEFAULT 0,
 			created_at DATETIME,
 			updated_at DATETIME
 		)`,
@@ -227,6 +229,21 @@ func migrateExtraParamsToggle(db *gorm.DB, cfg *config.Config) {
 	// 确保现有行启用
 	db.Exec("UPDATE provider_configs SET enable_extra_params = 1 WHERE enable_extra_params IS NULL OR enable_extra_params = 0")
 	slog.Info("enable_extra_params 列添加完成")
+}
+
+// migrateAutoFixThinking 为 provider_configs 添加 auto_fix_thinking 列（默认关闭）
+func migrateAutoFixThinking(db *gorm.DB, cfg *config.Config) {
+	if db.Migrator().HasColumn(&model.ProviderConfig{}, "auto_fix_thinking") {
+		return
+	}
+
+	slog.Info("正在更新 provider_configs 表，添加 auto_fix_thinking 列...")
+	if cfg.IsSQLite() {
+		db.Exec("ALTER TABLE provider_configs ADD COLUMN auto_fix_thinking INTEGER DEFAULT 0")
+	} else {
+		db.Exec("ALTER TABLE provider_configs ADD COLUMN auto_fix_thinking TINYINT(1) DEFAULT 0")
+	}
+	slog.Info("auto_fix_thinking 列添加完成")
 }
 
 func createModelIndexes(db *gorm.DB) {

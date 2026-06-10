@@ -30,6 +30,17 @@ export default function RecentRequestsTable({ logs, showTps = false, showCost = 
   const pickerRef = useRef<HTMLDivElement>(null);
   const [sortBy, setSortBy] = useState("created_at");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [expandedMsgs, setExpandedMsgs] = useState<Set<string>>(new Set(['outer_msgs']));
+  const [showRawJson, setShowRawJson] = useState(false);
+
+  const toggleMsg = (key: string) => {
+    setExpandedMsgs(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) { next.delete(key); } else { next.add(key); }
+      return next;
+    });
+  };
 
   // Sorted logs
   const sortedLogs = useMemo(() => {
@@ -210,46 +221,268 @@ export default function RecentRequestsTable({ logs, showTps = false, showCost = 
       </div>
 
       <Modal open={!!ld} onClose={cl} title="日志详情" className="max-w-3xl">
-        {ld && (
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              {[
-                ["Provider", ld.provider_name],
-                ["模型", ld.model],
-                ["状态", ld.status],
-                ["Token", ld.input_tokens != null ? `输入 ${ld.input_tokens} / 输出 ${ld.output_tokens} / 总计 ${ld.total_tokens}` : "-"],
-                ["缓存 Token", ld.cached_tokens > 0 ? `${ld.cached_tokens} (${ld.input_tokens > 0 ? (ld.cached_tokens / ld.input_tokens * 100).toFixed(1) + "%" : "-"})` : undefined],
-                ["错误信息", ld.error_message],
-                ["耗时", ld.duration > 0 ? `${(ld.duration / 1000).toFixed(1)}s` : "-"],
-              ].filter(([, v]) => v != null && v !== "").map(([label, value]) => (
-                <div key={label as string} className="flex flex-col">
-                  <span className="text-xs text-[#6B6580]">{label as string}</span>
-                  <span className="text-sm text-[#1E1B2E] break-all">{value as string}</span>
-                </div>
-              ))}
+        {ld && (() => {
+          const toolCalls: { id: string; type: string; function: { name: string; arguments: string } }[] = (() => {
+            try {
+              const body = JSON.parse(ld.response_body);
+              return body?.choices?.[0]?.message?.tool_calls || [];
+            } catch { return []; }
+          })();
+
+          const fmtArgs = (raw: string) => {
+            try { return JSON.stringify(JSON.parse(raw), null, 2); } catch { return raw || "(空)"; }
+          };
+
+          const doCopy = async (text: string, id: string) => {
+            await navigator.clipboard.writeText(text);
+            setCopiedId(id);
+            setTimeout(() => setCopiedId(null), 1500);
+          };
+
+          const CopyBtn = ({ text, blockId, label = "复制" }: { text: string; blockId: string; label?: string }) => (
+            <button
+              onClick={() => doCopy(text, blockId)}
+              className="flex items-center gap-1 px-2 py-1 text-[10px] text-[#9C94B0] hover:text-brand-600 hover:bg-[#FAF5FF] rounded-lg transition-colors"
+            >
+              {copiedId === blockId ? (
+                <svg className="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              ) : (
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              )}
+              {copiedId === blockId ? "已复制" : label}
+            </button>
+          );
+
+          const Section = ({ blockId, label, text, children }: { blockId: string; label: string; text: string; children: ReactNode }) => (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs text-[#6B6580]">{label}</span>
+                <CopyBtn text={text} blockId={blockId} />
+              </div>
+              {children}
             </div>
-            {ld.request_body && (
-              <div>
-                <span className="text-xs text-[#6B6580] block mb-1">请求体</span>
-                <pre className="bg-[#FAF5FF] border border-[#EDE9FE] rounded-lg p-3 text-xs text-[#1E1B2E] overflow-auto max-h-60 whitespace-pre-wrap break-all font-mono">
-                  {(() => { try { return JSON.stringify(JSON.parse(ld.request_body), null, 2); } catch { return ld.request_body; } })()}
-                </pre>
+          );
+
+          return (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  ["Provider", ld.provider_name],
+                  ["模型", ld.model],
+                  ["状态", ld.status],
+                  ["Token", ld.input_tokens != null ? `输入 ${ld.input_tokens} / 输出 ${ld.output_tokens} / 总计 ${ld.total_tokens}` : "-"],
+                  ["缓存 Token", ld.cached_tokens > 0 ? `${ld.cached_tokens} (${ld.input_tokens > 0 ? (ld.cached_tokens / ld.input_tokens * 100).toFixed(1) + "%" : "-"})` : undefined],
+                  ["错误信息", ld.error_message],
+                  ["耗时", ld.duration > 0 ? `${(ld.duration / 1000).toFixed(1)}s` : "-"],
+                ].filter(([, v]) => v != null && v !== "").map(([label, value]) => (
+                  <div key={label as string} className="flex flex-col">
+                    <span className="text-xs text-[#6B6580]">{label as string}</span>
+                    <span className="text-sm text-[#1E1B2E] break-all">{value as string}</span>
+                  </div>
+                ))}
               </div>
-            )}
-            {ld.response_content && (
-              <div>
-                <span className="text-xs text-[#6B6580] block mb-1">响应内容</span>
-                <pre className="bg-[#FAF5FF] border border-[#EDE9FE] rounded-lg p-3 text-xs text-[#1E1B2E] overflow-auto max-h-60 whitespace-pre-wrap break-all font-mono">{ld.response_content}</pre>
-              </div>
-            )}
-            {ld.thinking_content && (
-              <div>
-                <span className="text-xs text-[#6B6580] block mb-1">思考内容</span>
-                <pre className="bg-[#FAF5FF] border border-[#EDE9FE] rounded-lg p-3 text-xs text-[#1E1B2E] overflow-auto max-h-60 whitespace-pre-wrap break-all font-mono">{ld.thinking_content}</pre>
-              </div>
-            )}
-          </div>
-        )}
+
+              {ld.request_body && (() => {
+                const rawJson = (() => { try { return JSON.stringify(JSON.parse(ld.request_body), null, 2); } catch { return ld.request_body; } })();
+                const parsedBody = (() => { try { return JSON.parse(ld.request_body); } catch { return null; } })();
+                const isOpenAI = parsedBody && Array.isArray(parsedBody.messages);
+
+                if (!isOpenAI) {
+                  return (
+                    <Section blockId="request_body" label="请求体" text={rawJson}>
+                      <pre className="bg-[#FAF5FF] border border-[#EDE9FE] rounded-lg p-3 text-xs text-[#1E1B2E] overflow-auto max-h-60 whitespace-pre-wrap break-all font-mono">{rawJson}</pre>
+                    </Section>
+                  );
+                }
+
+                const msgs = parsedBody.messages;
+                const lastUserIdx = (() => {
+                  for (let i = msgs.length - 1; i >= 0; i--) {
+                    if (msgs[i].role === 'user') return i;
+                  }
+                  return -1;
+                })();
+
+                const roleStyle: Record<string, { badge: string; bg: string; label: string }> = {
+                  system: { badge: 'bg-purple-100 text-purple-700', bg: 'bg-purple-50', label: 'system' },
+                  user: { badge: 'bg-blue-100 text-blue-700', bg: 'bg-blue-50', label: 'user' },
+                  assistant: { badge: 'bg-emerald-100 text-emerald-700', bg: 'bg-emerald-50', label: 'assistant' },
+                  tool: { badge: 'bg-amber-100 text-amber-700', bg: 'bg-amber-50', label: 'tool' },
+                };
+
+                const fmtContent = (c: unknown): string => {
+                  if (typeof c === 'string') return c;
+                  if (c == null) return '';
+                  try { return JSON.stringify(c, null, 2); } catch { return String(c); }
+                };
+
+                const lineCount = (t: string) => t.split('\n').length;
+                const isLong = (t: string) => lineCount(t) > 2;
+
+                return (
+                  <Section blockId="request_body" label="请求体" text={rawJson}>
+                    {/* Summary line */}
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-3 text-xs text-[#6B6580] font-mono">
+                      <span>模型 <span className="text-[#1E1B2E] font-medium">{parsedBody.model || '-'}</span></span>
+                      <span className="text-[#D4C8E8]">·</span>
+                      <span>{msgs.length} 条消息</span>
+                      {parsedBody.max_tokens != null && (<><span className="text-[#D4C8E8]">·</span><span>max_tokens={parsedBody.max_tokens}</span></>)}
+                      {parsedBody.temperature != null && (<><span className="text-[#D4C8E8]">·</span><span>temperature={parsedBody.temperature}</span></>)}
+                      {parsedBody.stream != null && (<><span className="text-[#D4C8E8]">·</span><span>stream={String(parsedBody.stream)}</span></>)}
+                    </div>
+
+                    {/* Message cards - outer collapsible card */}
+                    <div className="border border-[#EDE9FE] rounded-lg overflow-hidden">
+                      {/* Outer card header */}
+                      <div
+                        className="flex items-center justify-between px-3 py-2 bg-[#FAF5FF] border-b border-[#EDE9FE] cursor-pointer select-none hover:bg-[#F5F0FF] transition-colors"
+                        onClick={() => toggleMsg('outer_msgs')}
+                      >
+                        <div className="flex items-center gap-2">
+                          <svg className={`w-3.5 h-3.5 text-[#6B6580] transition-transform ${expandedMsgs.has('outer_msgs') ? '' : '-rotate-90'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                          </svg>
+                          <span className="text-xs font-medium text-[#1E1B2E]">消息对话</span>
+                          <span className="text-[10px] text-[#9C94B0]">{msgs.length} 条</span>
+                        </div>
+                      </div>
+                      {expandedMsgs.has('outer_msgs') && (
+                        <div className="p-3 space-y-2">
+                          {msgs.map((msg: any, i: number) => {
+                            const rs = roleStyle[msg.role] || { badge: 'bg-gray-100 text-gray-700', bg: 'bg-gray-50', label: msg.role };
+                            const isLastUser = msg.role === 'user' && i === lastUserIdx;
+                            const textContent = fmtContent(msg.content);
+                            const hasInlineToolCalls = msg.role === 'assistant' && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0 && !textContent;
+                            const isExpanded = expandedMsgs.has(`msg_${i}`);
+                            const showFull = isLastUser || isExpanded;
+
+                            return (
+                              <div key={i} className="border border-[#EDE9FE] rounded-lg overflow-hidden">
+                                {/* Card header */}
+                                <div className={`flex items-center justify-between px-3 py-1.5 ${rs.bg} border-b border-[#EDE9FE]`}>
+                                  <div className="flex items-center gap-2">
+                                    <span className={`text-[11px] px-1.5 py-0.5 rounded-full font-semibold ${rs.badge}`}>{rs.label}</span>
+                                    {msg.role === 'tool' && msg.tool_call_id && (
+                                      <span className="text-[10px] text-[#9C94B0] font-mono">{msg.tool_call_id}</span>
+                                    )}
+                                  </div>
+                                  {hasInlineToolCalls && (
+                                    <span className="text-[10px] text-[#9C94B0]">{msg.tool_calls.length} 个工具调用</span>
+                                  )}
+                                  <div className="flex items-center gap-1">
+                                    {textContent && isLong(textContent) && !isLastUser && (
+                                      <button onClick={() => toggleMsg(`msg_${i}`)} className="text-[10px] text-[#9C94B0] hover:text-brand-600 transition-colors px-1">
+                                        {isExpanded ? '收起 ▴' : `展开全部 ▾ (${lineCount(textContent)} 行)`}
+                                      </button>
+                                    )}
+                                    {textContent && <CopyBtn text={textContent} blockId={`msg_copy_${i}`} />}
+                                  </div>
+                                </div>
+                                {/* Card body */}
+                                {hasInlineToolCalls ? (
+                                  <div className="p-2 space-y-1 bg-white">
+                                    {msg.tool_calls.map((tc: any, j: number) => {
+                                      const argsRaw = tc.function?.arguments;
+                                      const argsPretty = typeof argsRaw === 'string'
+                                        ? (() => { try { return JSON.stringify(JSON.parse(argsRaw), null, 2); } catch { return argsRaw; } })()
+                                        : fmtContent(argsRaw);
+                                      const argsLong = isLong(argsPretty);
+                                      const argsExpanded = expandedMsgs.has(`tc_${i}_${j}`);
+                                      return (
+                                        <div key={j} className="border border-[#EDE9FE] rounded-lg overflow-hidden bg-[#FAF5FF]">
+                                          <div className="flex items-center justify-between px-2 py-1 bg-[#F5F0FF] border-b border-[#EDE9FE]">
+                                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-semibold">{tc.function?.name || 'unknown'}</span>
+                                            <div className="flex items-center gap-1">
+                                              {argsLong && (
+                                                <button onClick={() => toggleMsg(`tc_${i}_${j}`)} className="text-[10px] text-[#9C94B0] hover:text-brand-600 transition-colors px-1">
+                                                  {argsExpanded ? '收起 ▴' : `展开全部 ▾ (${lineCount(argsPretty)} 行)`}
+                                                </button>
+                                              )}
+                                              <CopyBtn text={argsPretty} blockId={`tc_copy_${i}_${j}`} />
+                                            </div>
+                                          </div>
+                                          <pre className="p-2 text-[11px] text-[#1E1B2E] overflow-auto max-h-60 whitespace-pre-wrap break-all font-mono">
+                                            {!argsLong || argsExpanded ? argsPretty : argsPretty.split('\n').slice(0, 5).join('\n') + '\n...'}
+                                          </pre>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                ) : (
+                                  <pre className="bg-white p-3 text-xs text-[#1E1B2E] overflow-auto max-h-[300px] whitespace-pre-wrap break-all font-mono">
+                                    {!textContent ? <span className="text-[#9C94B0] italic">(空)</span> : (!isLong(textContent) || showFull ? textContent : textContent.split('\n').slice(0, 5).join('\n') + '\n...')}
+                                  </pre>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Raw JSON toggle */}
+                    <div className="mt-3">
+                      <button onClick={() => setShowRawJson(v => !v)} className="flex items-center gap-1 text-xs text-[#9C94B0] hover:text-brand-600 transition-colors">
+                        <svg className={`w-3 h-3 transition-transform ${showRawJson ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                        查看原始 JSON
+                      </button>
+                      {showRawJson && (
+                        <pre className="mt-1 bg-[#FAF5FF] border border-[#EDE9FE] rounded-lg p-3 text-xs text-[#1E1B2E] overflow-auto max-h-60 whitespace-pre-wrap break-all font-mono">{rawJson}</pre>
+                      )}
+                    </div>
+                  </Section>
+                );
+              })()}
+
+              {ld.thinking_content && (
+                <Section blockId="thinking_content" label="思考内容" text={ld.thinking_content}>
+                  <pre className="bg-[#FAF5FF] border border-[#EDE9FE] rounded-lg p-3 text-xs text-[#1E1B2E] overflow-auto max-h-60 whitespace-pre-wrap break-all font-mono">{ld.thinking_content}</pre>
+                </Section>
+              )}
+
+              {ld.response_content && (
+                <Section blockId="response_content" label="响应内容" text={ld.response_content}>
+                  <pre className="bg-[#FAF5FF] border border-[#EDE9FE] rounded-lg p-3 text-xs text-[#1E1B2E] overflow-auto max-h-60 whitespace-pre-wrap break-all font-mono">{ld.response_content}</pre>
+                </Section>
+              )}
+
+
+              {toolCalls.length > 0 && (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs text-[#6B6580]">工具调用 ({toolCalls.length})</span>
+                    <CopyBtn
+                      text={toolCalls.map((tc) => `[${tc.function?.name || "unknown"}]\n${fmtArgs(tc.function?.arguments || "")}`).join("\n\n")}
+                      blockId="tool_calls_all"
+                      label="全部复制"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    {toolCalls.map((tc, i) => (
+                      <div key={i} className="border border-[#EDE9FE] rounded-lg overflow-hidden">
+                        <div className="flex items-center justify-between px-3 py-1.5 bg-[#F5F0FF] border-b border-[#EDE9FE]">
+                          <span className="text-[11px] px-2 py-0.5 rounded-full bg-brand-100 text-brand-700 font-semibold">
+                            {tc.function?.name || "unknown"}
+                          </span>
+                          <CopyBtn text={fmtArgs(tc.function?.arguments || "")} blockId={`tc_${i}`} />
+                        </div>
+                        <pre className="bg-[#FAF5FF] p-3 text-xs text-[#1E1B2E] overflow-auto max-h-60 whitespace-pre-wrap break-all font-mono">
+                          {fmtArgs(tc.function?.arguments || "")}
+                        </pre>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </Modal>
     </>
   );

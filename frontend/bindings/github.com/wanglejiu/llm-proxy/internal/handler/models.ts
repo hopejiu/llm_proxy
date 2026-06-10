@@ -36,7 +36,7 @@ export class ActiveRequest {
     "start_time": time$0.Time;
 
     /**
-     * "openai" | "anthropic" | "ollama"
+     * "openai"
      */
     "protocol": string;
     "client_ip": string;

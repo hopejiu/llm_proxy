@@ -379,8 +379,3 @@ func (s *StatsService) GetHourlyStatsByDateWithBreakdown(dateStr string, provide
 
 	return items, nil
 }
-
-// currentHourStart 返回当前小时的起始时间
-func currentHourStart() time.Time {
-	return time.Now().Truncate(time.Hour)
-}
