@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Events } from "@wailsio/runtime";
 import { StatsAPI } from "../services";
-import { useLocalStorage } from "../hooks/useLocalStorage";
 import Modal from "../components/Modal";
 import RecentRequestsTable from "../components/RecentRequestsTable";
 
@@ -57,7 +56,6 @@ function StatCard({ label, badge, mainValue, mainUnit, children }: any) {
 export default function RealtimePage() {
   const [requests, setRequests] = useState<ActiveRequest[]>([]);
   const [recentLogs, setRecentLogs] = useState<any[]>([]);
-  const [settings, setSettings] = useLocalStorage("realtime_settings", { autoRefresh: true, interval: 2 });
   const [activeDetailId, setActiveDetailId] = useState<string | null>(null);
   const [updateTime, setUpdateTime] = useState("");
   const autoRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -125,28 +123,18 @@ export default function RealtimePage() {
     };
   }, [fetchData]);
 
-  // 轮询：仅用于"最近完成的请求"（数据库持久化数据）
+  // 轮询：仅用于"最近完成的请求"，每 2s 刷新；有正在进行的请求时跳过
   useEffect(() => {
-    if (autoRef.current) clearInterval(autoRef.current);
-    if (settings.autoRefresh) {
-      autoRef.current = setInterval(async () => {
-        try {
-          const logs = await StatsAPI.getRecentLogs(30);
-          setRecentLogs(logs || []);
-          setUpdateTime(new Date().toLocaleTimeString());
-        } catch {}
-      }, settings.interval * 1000);
-    }
+    autoRef.current = setInterval(async () => {
+      if (streamingCount > 0) return;
+      try {
+        const logs = await StatsAPI.getRecentLogs(30);
+        setRecentLogs(logs || []);
+        setUpdateTime(new Date().toLocaleTimeString());
+      } catch {}
+    }, 2000);
     return () => { if (autoRef.current) clearInterval(autoRef.current); };
-  }, [settings.autoRefresh, settings.interval]);
-
-  function toggleAutoRefresh() {
-    setSettings({ ...settings, autoRefresh: !settings.autoRefresh });
-  }
-
-  function changeInterval(val: number) {
-    setSettings({ ...settings, interval: val });
-  }
+  }, [streamingCount]);
 
   function elapsedSince(t: string): string {
     return ((Date.now() - new Date(t).getTime()) / 1000).toFixed(1);
@@ -168,13 +156,6 @@ export default function RealtimePage() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <StatCard label="活跃请求" badge="Active" mainValue={requests.length} mainUnit="个请求">
           <div className="mt-2 text-xs"><span className="text-[#9C94B0]">其中流式 </span><span className="font-semibold text-brand-600">{streamingCount} 个</span></div>
-        </StatCard>
-        <StatCard label="刷新间隔" badge="Interval" mainValue={settings.interval} mainUnit="秒">
-          <div className="mt-2">
-            <select value={settings.interval} onChange={(e) => changeInterval(Number(e.target.value))} className="input-field text-xs w-full">
-              <option value={1}>1秒</option><option value={2}>2秒</option><option value={3}>3秒</option><option value={5}>5秒</option><option value={10}>10秒</option>
-            </select>
-          </div>
         </StatCard>
       </div>
 
@@ -254,14 +235,6 @@ export default function RealtimePage() {
           <h2 className="card-title">最近完成的请求</h2>
           <div className="flex items-center gap-3">
             <span className="text-xs text-[#9C94B0]">{updateTime ? `更新于 ${updateTime}` : "-"}</span>
-            <div className="flex items-center gap-2 text-xs text-[#6B6580]">
-              <span>自动刷新</span>
-              <label className="toggle">
-                <input type="checkbox" checked={settings.autoRefresh} onChange={toggleAutoRefresh} className="sr-only peer" />
-                <div className="toggle-track peer-checked:bg-brand-600" />
-                <div className="toggle-thumb peer-checked:translate-x-4" />
-              </label>
-            </div>
           </div>
         </div>
         <RecentRequestsTable logs={recentLogs} showTps />

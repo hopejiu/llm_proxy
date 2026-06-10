@@ -26,6 +26,8 @@ export const StatsAPI = {
   getLogDetail: (id: number) => StatsService.GetLogDetail(id),
   // 会话
   getSessions: () => StatsService.GetSessions().then((r: any) => r || []),
+  getSessionsPaginated: (page: number, pageSize: number, sessionID: number = 0) =>
+    StatsService.GetSessionsPaginated(page, pageSize, sessionID).then((r: any) => r),
   getSessionRequests: (sessionID: number) => StatsService.GetSessionRequests(sessionID).then((r: any) => r || []),
 };
 

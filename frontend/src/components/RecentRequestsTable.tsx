@@ -28,6 +28,28 @@ export default function RecentRequestsTable({ logs, showTps = false, showCost = 
   const { detail: ld, fetch: fl, clear: cl } = useLogDetail();
   const [showPicker, setShowPicker] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
+  const [sortBy, setSortBy] = useState("created_at");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+
+  // Sorted logs
+  const sortedLogs = useMemo(() => {
+    if (sortBy !== "created_at") return logs;
+    return [...logs].sort((a: any, b: any) => {
+      const va = a.created_at || "";
+      const vb = b.created_at || "";
+      return sortOrder === "desc" ? vb.localeCompare(va) : va.localeCompare(vb);
+    });
+  }, [logs, sortBy, sortOrder]);
+
+  const toggleSort = (colId: string) => {
+    if (colId !== "created_at") return;
+    if (sortBy === colId) {
+      setSortOrder(o => o === "desc" ? "asc" : "desc");
+    } else {
+      setSortBy(colId);
+      setSortOrder("desc");
+    }
+  };
 
   const allCols: ColumnDef[] = useMemo(() => [
     { id: "created_at", key: "created_at", label: "时间", className: "text-[#6B6580] font-mono text-xs whitespace-nowrap", defaultVisible: true },
@@ -143,7 +165,21 @@ export default function RecentRequestsTable({ logs, showTps = false, showCost = 
           <thead>
             <tr className="border-b border-[#F0EBF5]">
               {visibleCols.map((col) => (
-                <th key={col.id} className={`table-th ${col.className}`}>{col.label}</th>
+                <th
+                  key={col.id}
+                  onClick={col.id === "created_at" ? () => toggleSort(col.id) : undefined}
+                  className={`table-th ${col.className} ${col.id === "created_at" ? "cursor-pointer select-none hover:text-brand-600 transition-colors" : ""}`}
+                  title={col.id === "created_at" ? `点击按时间${sortOrder === "desc" ? "升序" : "降序"}排列` : undefined}
+                >
+                  <span className="inline-flex items-center gap-1">
+                    {col.label}
+                    {col.id === "created_at" && (
+                      <svg className={`w-3 h-3 transition-transform ${sortOrder === "desc" ? "" : "rotate-180"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    )}
+                  </span>
+                </th>
               ))}
             </tr>
           </thead>
@@ -151,7 +187,7 @@ export default function RecentRequestsTable({ logs, showTps = false, showCost = 
             {logs.length === 0 ? (
               <tr><td colSpan={visibleCols.length} className="text-center py-12 text-[#9C94B0]">{emptyText}</td></tr>
             ) : (
-              logs.map((log) => (
+              sortedLogs.map((log) => (
                 <tr key={log.id} className="table-tr">
                   {visibleCols.map((col) => (
                     <td key={col.id} className={`py-3 px-3 ${col.className}`}>

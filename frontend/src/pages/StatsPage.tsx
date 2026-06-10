@@ -6,7 +6,6 @@ import { GridComponent, TooltipComponent, LegendComponent } from "echarts/compon
 import { CanvasRenderer } from "echarts/renderers";
 import { StatsAPI } from "../services";
 import { useProviders } from "../hooks/useProviders";
-import { useLocalStorage } from "../hooks/useLocalStorage";
 import Skeleton from "../components/Skeleton";
 import RecentRequestsTable from "../components/RecentRequestsTable";
 import { fmtYuan, buildPricingMap, computeModelCost, computeCostBreakdown, lookupLogPrices } from "../utils/cost";
@@ -97,7 +96,6 @@ export default function StatsPage() {
   const [bd,setBd] = useState<any[]>([]);
   const [loading,setLoading] = useState(true);
   const [refreshing,setRefreshing] = useState(false);
-  const [sett,setSett] = useLocalStorage("stats_settings", { autoRefresh: false });
   const [dim,setDim] = useState<"tokens"|"requests">("tokens");
   const [hDate,setHDate] = useState(()=>fd(new Date()));
   const [showDD,setShowDD] = useState(false);
@@ -204,11 +202,18 @@ export default function StatsPage() {
   }, [filteredModelStats, pricingMap]);
 
   // Enrich recent logs with cost + filter by modelFilter
+  // 注意: RequestLogVO 字段为 input_tokens/output_tokens/cached_tokens（无 total_ 前缀）
+  // 需要映射到 computeModelCost 期望的 total_input_tokens 等字段名
   const enrichedRecent = useMemo(() => recent
     .filter((log: any) => !modelFilter || log.model === modelFilter)
     .map((log: any) => {
       const prices = lookupLogPrices(pricingMap, log.provider_id, log.model);
-      return { ...log, _cost: computeModelCost(log, prices) };
+      const usage = {
+        total_input_tokens: log.input_tokens || 0,
+        total_output_tokens: log.output_tokens || 0,
+        total_cached_tokens: log.cached_tokens || 0,
+      };
+      return { ...log, _cost: computeModelCost(usage, prices) };
     }), [recent, pricingMap, modelFilter]);
 
   const fetchHourly = useCallback(async (date: string, pid: number) => {
@@ -257,7 +262,7 @@ export default function StatsPage() {
   }, [sp, hDate, fetchHourly, modelFilter]);
 
   useEffect(()=>{setLoading(true);fetchAll()},[fetchAll]);
-  useEffect(()=>{if(autoRef.current)clearInterval(autoRef.current);if(sett.autoRefresh)autoRef.current=setInterval(fetchAll,10000);return()=>{if(autoRef.current)clearInterval(autoRef.current)}},[sett.autoRefresh,fetchAll]);
+  useEffect(()=>{autoRef.current=setInterval(fetchAll,2000);return()=>{if(autoRef.current)clearInterval(autoRef.current)}},[fetchAll]);
   useEffect(()=>{function h(e:MouseEvent){if(ddRef.current&&!ddRef.current.contains(e.target as Node))setShowDD(false)}document.addEventListener("click",h);return()=>document.removeEventListener("click",h)},[]);
   useEffect(()=>{if(!stacked){setBd([]);return}StatsAPI.getHourlyStatsByDateWithBreakdown(hDate, sp).then((d:any)=>setBd(d||[])).catch(()=>setBd([]))},[hDate,sp,stacked]);
 
@@ -373,14 +378,6 @@ export default function StatsPage() {
       <h1 className="page-title">统计仪表盘</h1>
       <div className="flex items-center gap-3">
         <span className="text-xs text-[#9C94B0]">{updateTime ? `更新于 ${updateTime}` : ""}</span>
-        <div className="flex items-center gap-2 text-xs text-[#6B6580]">
-          <span>自动刷新</span>
-          <label className="toggle">
-            <input type="checkbox" checked={sett.autoRefresh} onChange={()=>setSett({autoRefresh:!sett.autoRefresh})} className="sr-only peer" />
-            <div className="toggle-track peer-checked:bg-brand-600" />
-            <div className="toggle-thumb peer-checked:translate-x-4" />
-          </label>
-        </div>
         <button onClick={fetchAll} disabled={refreshing} className="btn-ghost p-1.5 disabled:opacity-50" title="刷新">
           <svg className={`w-4 h-4 ${refreshing?"animate-spin":""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
         </button>

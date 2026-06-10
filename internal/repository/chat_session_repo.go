@@ -40,6 +40,34 @@ func (r *ChatSessionRepository) GetAll() ([]model.ChatSession, error) {
 	return sessions, err
 }
 
+// GetPaginated 分页查询会话列表，sessionID > 0 时按 ID 精确搜索
+// 返回会话列表和总条数
+func (r *ChatSessionRepository) GetPaginated(page, pageSize int, sessionID uint) ([]model.ChatSession, int64, error) {
+	var sessions []model.ChatSession
+	var total int64
+
+	q := r.dbManager.GetDB().Model(&model.ChatSession{})
+	if sessionID > 0 {
+		q = q.Where("id = ?", sessionID)
+	}
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+
+	err := q.Order("created_at desc").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Find(&sessions).Error
+	return sessions, total, err
+}
+
 // RecalcSessionStats 根据 request_logs 重新聚合会话统计并回写 chat_sessions
 // 在每次请求结束时调用
 func (r *ChatSessionRepository) RecalcSessionStats(sessionID uint) {
@@ -100,6 +128,9 @@ func (r *ChatSessionRepository) RecalcSessionStats(sessionID uint) {
 }
 
 // calculateRequestCost 计算单次请求的成本
+// 公式: inputFee = (inputTokens - cachedTokens) / 1_000_000 * InputPrice   ← 扣除缓存命中
+//       outputFee = outputTokens / 1_000_000 * OutputPrice
+//       cacheFee  = cachedTokens / 1_000_000 * CachePrice
 func calculateRequestCost(dbManager *DBManager, providerID uint, modelName string, inputTokens, outputTokens, cachedTokens int) float64 {
 	if providerID == 0 || modelName == "" {
 		return 0
@@ -113,7 +144,11 @@ func calculateRequestCost(dbManager *DBManager, providerID uint, modelName strin
 	entries := provider.ParseModels()
 	for _, entry := range entries {
 		if entry.Name == modelName {
-			cost := (float64(inputTokens) / 1_000_000) * entry.InputPrice
+			paidInput := float64(inputTokens - cachedTokens)
+			if paidInput < 0 {
+				paidInput = 0
+			}
+			cost := (paidInput / 1_000_000) * entry.InputPrice
 			cost += (float64(outputTokens) / 1_000_000) * entry.OutputPrice
 			cost += (float64(cachedTokens) / 1_000_000) * entry.CachePrice
 			return cost

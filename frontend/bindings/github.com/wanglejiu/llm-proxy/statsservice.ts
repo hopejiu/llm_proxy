@@ -125,11 +125,20 @@ export function GetSessions(): $CancellablePromise<$models.SessionVO[]> {
 }
 
 /**
+ * GetSessionsPaginated 分页查询会话列表，sessionID > 0 时按 ID 精确搜索
+ */
+export function GetSessionsPaginated(page: number, pageSize: number, sessionID: number): $CancellablePromise<$models.PaginatedSessionsVO> {
+    return $Call.ByID(3407241674, page, pageSize, sessionID).then(($result: any) => {
+        return $$createType15($result);
+    });
+}
+
+/**
  * GetStats 获取仪表盘统计
  */
 export function GetStats(providerID: number): $CancellablePromise<{ [_ in string]?: model$0.TokenStats | null }> {
     return $Call.ByID(802081133, providerID).then(($result: any) => {
-        return $$createType16($result);
+        return $$createType17($result);
     });
 }
 
@@ -156,5 +165,6 @@ const $$createType11 = $models.RequestLogVO.createFrom;
 const $$createType12 = $Create.Array($$createType11);
 const $$createType13 = $models.SessionVO.createFrom;
 const $$createType14 = $Create.Array($$createType13);
-const $$createType15 = $Create.Nullable($$createType2);
-const $$createType16 = $Create.Map($Create.Any, $$createType15);
+const $$createType15 = $models.PaginatedSessionsVO.createFrom;
+const $$createType16 = $Create.Nullable($$createType2);
+const $$createType17 = $Create.Map($Create.Any, $$createType16);

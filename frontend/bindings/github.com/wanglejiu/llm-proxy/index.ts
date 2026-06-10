@@ -18,6 +18,7 @@ export {
     HourlyStatBreakdownVO,
     LogEntryVO,
     ModelStatVO,
+    PaginatedSessionsVO,
     ProviderCreateVO,
     ProviderUpdateVO,
     ProviderVO,

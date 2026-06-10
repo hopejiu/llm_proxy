@@ -223,6 +223,38 @@ export class ModelStatVO {
     }
 }
 
+/**
+ * PaginatedSessionsVO 分页会话列表
+ */
+export class PaginatedSessionsVO {
+    "sessions": SessionVO[];
+    "total": number;
+
+    /** Creates a new PaginatedSessionsVO instance. */
+    constructor($$source: Partial<PaginatedSessionsVO> = {}) {
+        if (!("sessions" in $$source)) {
+            this["sessions"] = [];
+        }
+        if (!("total" in $$source)) {
+            this["total"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new PaginatedSessionsVO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): PaginatedSessionsVO {
+        const $$createField0_0 = $$createType1;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("sessions" in $$parsedSource) {
+            $$parsedSource["sessions"] = $$createField0_0($$parsedSource["sessions"]);
+        }
+        return new PaginatedSessionsVO($$parsedSource as Partial<PaginatedSessionsVO>);
+    }
+}
+
 export class ProviderCreateVO {
     "name": string;
     "auto_suffix": boolean;
@@ -574,3 +606,7 @@ export class SessionVO {
         return new SessionVO($$parsedSource as Partial<SessionVO>);
     }
 }
+
+// Private type creation functions
+const $$createType0 = SessionVO.createFrom;
+const $$createType1 = $Create.Array($$createType0);

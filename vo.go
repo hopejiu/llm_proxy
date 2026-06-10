@@ -145,6 +145,12 @@ type SessionVO struct {
 	UpdatedAt    string  `json:"updated_at"`
 }
 
+// PaginatedSessionsVO 分页会话列表
+type PaginatedSessionsVO struct {
+	Sessions []SessionVO `json:"sessions"`
+	Total    int64       `json:"total"`
+}
+
 // ========== Common VO ==========
 
 type LogEntryVO struct {

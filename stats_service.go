@@ -220,6 +220,32 @@ func (s *StatsService) GetSessions() ([]SessionVO, error) {
 	return result, nil
 }
 
+// GetSessionsPaginated 分页查询会话列表，sessionID > 0 时按 ID 精确搜索
+func (s *StatsService) GetSessionsPaginated(page, pageSize int, sessionID uint) (PaginatedSessionsVO, error) {
+	if s.sessionRepo == nil {
+		return PaginatedSessionsVO{}, NewAppError("INTERNAL", "会话功能未启用")
+	}
+	sessions, total, err := s.sessionRepo.GetPaginated(page, pageSize, sessionID)
+	if err != nil {
+		slog.Error("分页查询会话列表失败", "error", err)
+		return PaginatedSessionsVO{}, NewAppError("INTERNAL", "查询会话列表失败")
+	}
+
+	result := make([]SessionVO, len(sessions))
+	for i, sess := range sessions {
+		result[i] = SessionVO{
+			ID:           sess.ID,
+			Models:       sess.Models,
+			RequestCount: sess.RequestCount,
+			TotalTokens:  sess.TotalTokens,
+			TotalCost:    sess.TotalCost,
+			CreatedAt:    sess.CreatedAt.Format("2006-01-02 15:04:05"),
+			UpdatedAt:    sess.UpdatedAt.Format("2006-01-02 15:04:05"),
+		}
+	}
+	return PaginatedSessionsVO{Sessions: result, Total: total}, nil
+}
+
 // GetSessionRequests 获取指定会话的请求列表
 func (s *StatsService) GetSessionRequests(sessionID uint) ([]RequestLogVO, error) {
 	if s.sessionRepo == nil {
