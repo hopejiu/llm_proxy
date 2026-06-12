@@ -102,7 +102,7 @@ export default function StatsPage() {
   const [recent,setRecent] = useState<any[]>([]);
   const [updateTime,setUpdateTime] = useState("");
   const [modelStats, setModelStats] = useState<any[]>([]);
-  const [period, setPeriod] = useState<"today" | "week" | "total">("total");
+  const [period, setPeriod] = useState<"today" | "week" | "total">("today");
   const [modelFilter, setModelFilter] = useState<string | null>(null);
   const ddRef = useRef<HTMLDivElement>(null);
   const autoRef = useRef<ReturnType<typeof setInterval>|null>(null);
