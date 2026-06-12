@@ -6,6 +6,7 @@ import { GridComponent, TooltipComponent, LegendComponent } from "echarts/compon
 import { CanvasRenderer } from "echarts/renderers";
 import { StatsAPI } from "../services";
 import { useProviders } from "../hooks/useProviders";
+import { usePreserveScroll } from "../hooks/usePreserveScroll";
 import Skeleton from "../components/Skeleton";
 import RecentRequestsTable from "../components/RecentRequestsTable";
 import { fmtYuan, buildPricingMap, computeModelCost, computeCostBreakdown, lookupLogPrices } from "../utils/cost";
@@ -106,6 +107,8 @@ export default function StatsPage() {
   const [modelFilter, setModelFilter] = useState<string | null>(null);
   const ddRef = useRef<HTMLDivElement>(null);
   const autoRef = useRef<ReturnType<typeof setInterval>|null>(null);
+  const { scrollRef: mbTableRef, onScroll: onMbTableScroll } = usePreserveScroll();
+  const { scrollRef: ddTableRef, onScroll: onDdTableScroll } = usePreserveScroll();
   const isToday = hDate === fd(new Date());
   const maxHour = isToday ? Math.min(new Date().getHours(),23) : 23;
   const stacked = !modelFilter && providers.length > 0;
@@ -427,7 +430,7 @@ export default function StatsPage() {
         {modelBreakdown.length === 0 ? (
           <div className="text-center py-8 text-xs text-[#9C94B0]">该时间范围暂无数据</div>
         ) : (
-        <div className="table-wrap">
+        <div className="table-wrap" ref={mbTableRef} onScroll={onMbTableScroll}>
           <table className="table-base text-xs">
             <thead><tr className="border-b border-[#F0EBF5]">
               <th className="table-th">Provider</th>
@@ -506,7 +509,7 @@ export default function StatsPage() {
       <div className="card-header">
         <h2 className="card-title">每日明细</h2>
       </div>
-      <div className="table-wrap">
+      <div className="table-wrap" ref={ddTableRef} onScroll={onDdTableScroll}>
         <table className="table-base text-xs">
           <thead><tr className="border-b border-[#F0EBF5]">
             <th className="table-th">日期</th><th className="table-th text-right">请求数</th>

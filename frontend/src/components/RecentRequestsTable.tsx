@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, type ReactNode } from "react";
 import { useLogDetail } from "../hooks/useLogs";
 import { useLocalStorage } from "../hooks/useLocalStorage";
+import { usePreserveScroll } from "../hooks/usePreserveScroll";
 import Modal from "./Modal";
 import { fmtYuan } from "../utils/cost";
 
@@ -79,6 +80,8 @@ export default function RecentRequestsTable({ logs, showTps = false, showCost = 
   ], [showTps, showCost]);
 
   const defaultColumnIds = useMemo(() => allCols.filter(c => c.defaultVisible).map(c => c.id), [allCols]);
+
+  const { scrollRef: tableWrapRef, onScroll: onTableWrapScroll } = usePreserveScroll();
 
   const [visibleColumnIds, setVisibleColumnIds] = useLocalStorage<string[]>(
     "recent_requests_columns",
@@ -171,7 +174,7 @@ export default function RecentRequestsTable({ logs, showTps = false, showCost = 
           )}
         </div>
       </div>
-      <div className="table-wrap">
+      <div className="table-wrap" ref={tableWrapRef} onScroll={onTableWrapScroll}>
         <table className="table-base text-xs">
           <thead>
             <tr className="border-b border-[#F0EBF5]">
