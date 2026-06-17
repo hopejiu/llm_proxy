@@ -49,7 +49,7 @@ func main() {
 	}
 	logger.Init(logFilePath, logger.ParseLevel(cfg.LogLevel))
 	slog.Info("LLM Proxy 桌面应用启动中...")
-	slog.Info("配置加载成功", "db_type", cfg.DBType, "proxy_port", cfg.ProxyPort)
+	slog.Info("配置加载成功", "db_type", cfg.DBType, "proxy_port", cfg.ProxyPort, "auto_start_proxy", cfg.AutoStartProxy)
 
 	// 2. 初始化数据库
 	db, dbFallbackMsg := initDB(cfg)
