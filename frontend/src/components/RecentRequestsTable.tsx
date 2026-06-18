@@ -429,12 +429,15 @@ export default function RecentRequestsTable({ logs, showTps = false, showCost = 
 
                     {/* Raw JSON toggle */}
                     <div className="mt-3">
-                      <button onClick={() => setShowRawJson(v => !v)} className="flex items-center gap-1 text-xs text-[#9C94B0] hover:text-brand-600 transition-colors">
-                        <svg className={`w-3 h-3 transition-transform ${showRawJson ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                        </svg>
-                        查看原始 JSON
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => setShowRawJson(v => !v)} className="flex items-center gap-1 text-xs text-[#9C94B0] hover:text-brand-600 transition-colors">
+                          <svg className={`w-3 h-3 transition-transform ${showRawJson ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                          </svg>
+                          查看原始 JSON
+                        </button>
+                        <CopyBtn text={rawJson} blockId="raw_json" label="复制 JSON" />
+                      </div>
                       {showRawJson && (
                         <pre className="mt-1 bg-[#FAF5FF] border border-[#EDE9FE] rounded-lg p-3 text-xs text-[#1E1B2E] overflow-auto max-h-60 whitespace-pre-wrap break-all font-mono">{rawJson}</pre>
                       )}

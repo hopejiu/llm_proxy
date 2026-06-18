@@ -67,6 +67,7 @@ func (s *AppService) ServiceStartup(ctx context.Context, _ application.ServiceOp
 
 	// 自动启动代理
 	if s.cfg.AutoStartProxy {
+		slog.Info("自动启动代理：开始启动代理服务")
 		resultCh := make(chan error, 1)
 		s.startProxyServer(resultCh)
 		go func() {
@@ -74,6 +75,8 @@ func (s *AppService) ServiceStartup(ctx context.Context, _ application.ServiceOp
 				slog.Error("自动启动代理失败", "error", err)
 			}
 		}()
+	} else {
+		slog.Info("自动启动代理：已禁用，跳过自动启动")
 	}
 
 	return nil

@@ -438,7 +438,7 @@ export default function SettingsPage() {
           );
           if (items.length === 0) return null;
 
-          const hotUpdatableKeys = items.filter((i) => !i.restart_required).map((i) => i.key);
+          const visibleKeys = items.map((i) => i.key);
 
           return (
             <section key={group} className="section-card mb-4">
@@ -453,16 +453,14 @@ export default function SettingsPage() {
                 ))}
               </div>
 
-              {/* 热更新项可独立保存 */}
-              {hotUpdatableKeys.length > 0 && (
-                <div className="mt-4 pt-4 border-t border-[#F0EBF5]">
-                  <button onClick={() => saveSection(hotUpdatableKeys, group)}
-                    disabled={savingSections[group]}
-                    className="btn-secondary text-sm px-4 py-2">
-                    {savingSections[group] ? "保存中..." : "应用更改"}
-                  </button>
-                </div>
-              )}
+              {/* 保存当前组所有可见配置项 */}
+              <div className="mt-4 pt-4 border-t border-[#F0EBF5]">
+                <button onClick={() => saveSection(visibleKeys, group)}
+                  disabled={savingSections[group]}
+                  className="btn-secondary text-sm px-4 py-2">
+                  {savingSections[group] ? "保存中..." : "应用更改"}
+                </button>
+              </div>
             </section>
           );
         })

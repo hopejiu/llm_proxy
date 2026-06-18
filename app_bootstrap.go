@@ -50,25 +50,20 @@ func connectDB(cfg *config.Config) (*gorm.DB, string) {
 	}
 
 	slog.Info("正在连接 MySQL 数据库...")
-	db, err = gorm.Open(mysql.Open(cfg.DSN()), &gorm.Config{})
-	if err != nil {
-		slog.Warn("MySQL数据库连接失败，自动回退到 SQLite", "error", err)
-		cfg.FallbackToSQLite()
-		dbPath := cfg.SQLitePath()
-		if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-			if err := os.WriteFile(dbPath, []byte{}, 0644); err != nil {
-				fatalMessageBox("启动失败", "创建 SQLite 文件失败: "+err.Error())
-			}
+
+	// 带重试的 MySQL 连接
+	retryInterval := []time.Duration{1 * time.Second, 3 * time.Second, 5 * time.Second}
+	for i, interval := range retryInterval {
+		db, err = gorm.Open(mysql.Open(cfg.DSN()), &gorm.Config{})
+		if err == nil {
+			break
 		}
-		db, err = gorm.Open(sqlite.Open(cfg.SQLiteDSN()), &gorm.Config{
-			DisableForeignKeyConstraintWhenMigrating: true,
-		})
-		if err != nil {
-			fatalMessageBox("启动失败", "SQLite数据库连接失败: "+err.Error())
+		if i < len(retryInterval)-1 {
+			slog.Warn("MySQL数据库连接失败，即将重试", "attempt", i+1, "error", err)
+			time.Sleep(interval)
+		} else {
+			fatalMessageBox("启动失败", fmt.Sprintf("MySQL数据库连接失败，已重试 %d 次: %s", len(retryInterval), err.Error()))
 		}
-		configurePool(db, cfg)
-		slog.Info("已回退到 SQLite 数据库")
-		return db, "MySQL 连接失败，已自动回退到 SQLite，请在设置中重新配置数据库"
 	}
 
 	configurePool(db, cfg)
