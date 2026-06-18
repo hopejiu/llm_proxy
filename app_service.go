@@ -247,6 +247,22 @@ func (s *AppService) EnvFileExists() bool {
 	return config.EnvFileExists()
 }
 
+// GetAutoModel 获取 auto 默认模型配置
+func (s *AppService) GetAutoModel() string {
+	return s.cfg.GetAutoModel()
+}
+
+// SetAutoModel 设置 auto 默认模型（格式 "providerID:modelName"），持久化到 .env 并热更新
+func (s *AppService) SetAutoModel(val string) error {
+	if err := config.SaveEnvItems(map[string]string{"AUTO_MODEL": val}); err != nil {
+		slog.Error("保存 AUTO_MODEL 失败", "error", err)
+		return err
+	}
+	s.cfg.HotUpdate()
+	slog.Info("Auto 模型已更新", "auto_model", val)
+	return nil
+}
+
 // ========== 系统信息 ==========
 
 // GetVersion 获取应用版本号和构建时间

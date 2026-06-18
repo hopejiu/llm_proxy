@@ -51,4 +51,7 @@ export const AppAPI = {
   // 开机自启动
   getAutostartStatus: () => AppService.GetAutostartStatus(),
   setAutostart: (enabled: boolean) => AppService.SetAutostart(enabled),
+  // Auto 默认模型
+  getAutoModel: () => AppService.GetAutoModel().then((r: any) => r || ""),
+  setAutoModel: (val: string) => AppService.SetAutoModel(val),
 };

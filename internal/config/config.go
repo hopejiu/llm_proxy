@@ -39,6 +39,9 @@ type Config struct {
 	// 桌面应用配置
 	AutoStartProxy bool // 启动时是否自动启动代理服务
 	AutoStartApp   bool // 开机自启动
+
+	// Auto 模型（可热更新）
+	AutoModel string // model=auto 时使用的默认模型，格式 "providerID:modelName"
 }
 
 // ========== 可热更新字段的 Getter（使用泛型辅助消除 RLock 样板代码）==========
@@ -68,6 +71,9 @@ func (c *Config) GetLogCleanupDays() int { return readLocked(&c.mu, func() int {
 // GetLogLevel 获取日志级别
 func (c *Config) GetLogLevel() string { return readLocked(&c.mu, func() string { return c.LogLevel }) }
 
+// GetAutoModel 获取 auto 默认模型（格式 "providerID:modelName"）
+func (c *Config) GetAutoModel() string { return readLocked(&c.mu, func() string { return c.AutoModel }) }
+
 // ========== 热更新方法 ==========
 
 // HotUpdate 从 .env 文件重新加载可热更新的字段
@@ -93,6 +99,7 @@ func (c *Config) HotUpdate() {
 	c.LogLevel = getFromMap(envMap, "LOG_LEVEL", "info")
 	c.AutoStartProxy = getBoolFromMap(envMap, "AUTO_START_PROXY", true)
 	c.AutoStartApp = getBoolFromMap(envMap, "AUTO_START_APP", false)
+	c.AutoModel = getFromMap(envMap, "AUTO_MODEL", "")
 }
 
 // loadEnvFileMap 从 .env 文件读取所有键值对

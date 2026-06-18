@@ -18,6 +18,14 @@ echarts.use([BarChart, LineChart, GridComponent, TooltipComponent, LegendCompone
 const PURPLE = ["#7C3AED","#A78BFA","#C4B5FD","#8B5CF6","#6D28D9","#5B21B6","#10B981","#F59E0B"];
 function fd(d: Date) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
 function ds(s: string) { return s ? s.slice(0,10) : ""; }
+function getMonday(d: Date): Date {
+  const r = new Date(d);
+  const day = r.getDay(); // 0=Sun, 1=Mon...
+  const diff = day === 0 ? -6 : 1 - day;
+  r.setDate(r.getDate() + diff);
+  r.setHours(0, 0, 0, 0);
+  return r;
+}
 function cacheRate(cached?: number|null, input?: number|null): string {
   if (!cached || !input || input === 0) return "-";
   return (cached / input * 100).toFixed(1) + "%";
@@ -44,7 +52,7 @@ function Trend({c,p}:{c:number;p:number}) {
   return <span className="ml-2 text-[10px] text-[#9C94B0]">— 0%</span>;
 }
 
-function Card({l,n,d,tr,cost}:any){
+function Card({l,n,d,tr,cost,hideCost}:any){
   const items = [
     {k:"total_input_tokens", lab:"Input"},
     {k:"total_output_tokens", lab:"Output"},
@@ -63,7 +71,7 @@ function Card({l,n,d,tr,cost}:any){
         </span>
         <span className="text-xs text-[#9C94B0]">Tokens{tr}</span>
       </div>
-      {cost != null && (
+      {!hideCost && cost != null && (
         <div className="mb-2">
           <span className="text-[13px] font-bold font-heading" style={{color: cost > 0 ? "#059669" : "#9C94B0"}}>
             {fmtYuan(cost)}
@@ -144,8 +152,7 @@ export default function StatsPage() {
   // 规范化日期: 后端 DATE() 经 Go string 返回可能是 "2026-06-09T00:00:00+08:00"，统一截取前 10 位
   const filteredModelStats = useMemo(() => {
     const todayStr = fd(new Date());
-    const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
-    const weekStr = fd(weekAgo);
+    const weekStr = fd(getMonday(new Date()));
     if (modelStats.length > 0) {
       logger.debug("modelStats 原始日期", { sample: modelStats[0]?.date, count: modelStats.length, todayStr });
     }
@@ -158,32 +165,39 @@ export default function StatsPage() {
     }).map((ms: any) => ({ ...ms, date: ds(ms.date) }));
   }, [modelStats, period, modelFilter]);
 
-  // Compute costs from filteredModelStats + pricingMap
+  // 仅规范化日期，不过滤 period/modelFilter（用于概览卡片、趋势、每日明细等不受 period 影响的区域）
+  const unfilteredModelStats = useMemo(() => {
+    return modelStats.map((ms: any) => ({ ...ms, date: ds(ms.date) }));
+  }, [modelStats]);
+
+  // 基于 raw modelStats 计算三个概览卡片的今日/本周/总计花费（不受 period 过滤影响）
+  const cardTodayCost = useMemo(() => {
+    const todayStr = fd(new Date());
+    return modelStats
+      .filter((ms: any) => ds(ms.date) === todayStr)
+      .reduce((s: number, ms: any) => s + computeModelCost(ms, pricingMap[ms.provider_id]?.[ms.model]), 0);
+  }, [modelStats, pricingMap]);
+
+  const cardWeekCost = useMemo(() => {
+    const ws = fd(getMonday(new Date()));
+    return modelStats
+      .filter((ms: any) => ds(ms.date) >= ws)
+      .reduce((s: number, ms: any) => s + computeModelCost(ms, pricingMap[ms.provider_id]?.[ms.model]), 0);
+  }, [modelStats, pricingMap]);
+
+  const cardTotalCost = useMemo(() =>
+    modelStats.reduce((s: number, ms: any) => s + computeModelCost(ms, pricingMap[ms.provider_id]?.[ms.model]), 0),
+  [modelStats, pricingMap]);
+
+  // Compute daily cost map from unfilteredModelStats + pricingMap（用于每日明细表格的花费列，不受 period 影响）
   const dailyCostMap = useMemo(() => {
     const map: Record<string, number> = {};
-    for (const ms of filteredModelStats) {
+    for (const ms of unfilteredModelStats) {
       if (!map[ms.date]) map[ms.date] = 0;
       map[ms.date] += computeModelCost(ms, pricingMap[ms.provider_id]?.[ms.model]);
     }
     return map;
-  }, [filteredModelStats, pricingMap]);
-
-  const todayCost = useMemo(() => {
-    const todayStr = fd(new Date());
-    return filteredModelStats.filter((ms: any) => ms.date === todayStr)
-      .reduce((s: number, ms: any) => s + computeModelCost(ms, pricingMap[ms.provider_id]?.[ms.model]), 0);
-  }, [filteredModelStats, pricingMap]);
-
-  const weekCost = useMemo(() => {
-    const wa = new Date(); wa.setDate(wa.getDate() - 7);
-    const ws = fd(wa);
-    return filteredModelStats.filter((ms: any) => ms.date >= ws)
-      .reduce((s: number, ms: any) => s + computeModelCost(ms, pricingMap[ms.provider_id]?.[ms.model]), 0);
-  }, [filteredModelStats, pricingMap]);
-
-  const totalCost = useMemo(() =>
-    filteredModelStats.reduce((s: number, ms: any) => s + computeModelCost(ms, pricingMap[ms.provider_id]?.[ms.model]), 0),
-  [filteredModelStats, pricingMap]);
+  }, [unfilteredModelStats, pricingMap]);
 
   // Model breakdown (aggregate filtered stats)
   const modelBreakdown = useMemo(() => {
@@ -271,13 +285,12 @@ export default function StatsPage() {
   useEffect(()=>{function h(e:MouseEvent){if(ddRef.current&&!ddRef.current.contains(e.target as Node))setShowDD(false)}document.addEventListener("click",h);return()=>document.removeEventListener("click",h)},[]);
   useEffect(()=>{if(!stacked){setBd([]);return}StatsAPI.getHourlyStatsByDateWithBreakdown(hDate, sp).then((d:any)=>setBd(d||[])).catch(()=>setBd([]))},[hDate,sp,stacked]);
 
-  // When modelFilter is set, compute overview cards from filteredModelStats
+  // When modelFilter is set, compute overview cards from unfilteredModelStats
   const emptyAgg = () => ({ total_input_tokens: 0, total_output_tokens: 0, total_cached_tokens: 0, total_tokens: 0, request_count: 0 });
   const modelOverview = useMemo(() => {
     if (!modelFilter) return null;
     const todayStr = fd(new Date());
-    const wa = new Date(); wa.setDate(wa.getDate() - 7);
-    const weekStr = fd(wa);
+    const weekStr = fd(getMonday(new Date()));
     const agg = (items: any[]) => items.reduce((s: any, ms: any) => ({
       total_input_tokens: (s.total_input_tokens || 0) + ms.total_input_tokens,
       total_output_tokens: (s.total_output_tokens || 0) + ms.total_output_tokens,
@@ -286,24 +299,24 @@ export default function StatsPage() {
       request_count: (s.request_count || 0) + ms.request_count,
     }), emptyAgg());
     return {
-      today: agg(filteredModelStats.filter((ms: any) => ms.date === todayStr)),
-      week: agg(filteredModelStats.filter((ms: any) => ms.date >= weekStr)),
-      total: agg(filteredModelStats),
+      today: agg(unfilteredModelStats.filter((ms: any) => ms.date === todayStr)),
+      week: agg(unfilteredModelStats.filter((ms: any) => ms.date >= weekStr)),
+      total: agg(unfilteredModelStats),
     };
-  }, [modelFilter, filteredModelStats]);
+  }, [modelFilter, unfilteredModelStats]);
 
   // Trend values: use modelOverview when filter is active, otherwise use provider-level data
   const overview = modelOverview || { today: data?.today, week: data?.week, total: data?.total };
   const tt = overview?.today?.total_tokens || 0;
-  const yt = (()=>{const y=new Date();y.setDate(y.getDate()-1);const ys=fd(y);return (modelFilter ? filteredModelStats.filter((ms:any)=>ms.date===ys).reduce((s:number,ms:any)=>s+ms.total_tokens,0) : daily.find((s:any)=>ds(s.date)===ys)?.total_tokens)||0;})();
+  const yt = (()=>{const y=new Date();y.setDate(y.getDate()-1);const ys=fd(y);return (modelFilter ? unfilteredModelStats.filter((ms:any)=>ms.date===ys).reduce((s:number,ms:any)=>s+ms.total_tokens,0) : daily.find((s:any)=>ds(s.date)===ys)?.total_tokens)||0;})();
   const wt = overview?.week?.total_tokens || 0;
-  const lwt = (()=>{const t=new Date();if(modelFilter){let tot=0;for(let i=7;i<14;i++){const d=new Date(t);d.setDate(d.getDate()-i);tot+=filteredModelStats.filter((ms:any)=>ms.date===fd(d)).reduce((s:number,ms:any)=>s+ms.total_tokens,0);}return tot;}let tot=0;for(let i=7;i<14;i++){const d=new Date(t);d.setDate(d.getDate()-i);tot+=daily.find((s:any)=>ds(s.date)===fd(d))?.total_tokens||0;}return tot;})();
+  const lwt = (()=>{const lm=fd(new Date(getMonday(new Date()).getTime()-7*86400000)),tm=fd(getMonday(new Date()));if(modelFilter){return unfilteredModelStats.filter((ms:any)=>ms.date>=lm&&ms.date<tm).reduce((s:number,ms:any)=>s+ms.total_tokens,0);}return daily.filter((s:any)=>ds(s.date)>=lm&&ds(s.date)<tm).reduce((s:number,s2:any)=>s+(s2.total_tokens||0),0);})();
 
-  // Daily data: provider-level from API, or model-level from filteredModelStats
+  // Daily data: provider-level from API, or model-level from unfilteredModelStats
   const dailyWithCost = useMemo(() => {
     if (modelFilter) {
       const map: Record<string, any> = {};
-      for (const ms of filteredModelStats) {
+      for (const ms of unfilteredModelStats) {
         if (!map[ms.date]) map[ms.date] = { date: ms.date, total_input_tokens: 0, total_output_tokens: 0, total_cached_tokens: 0, total_tokens: 0, request_count: 0, total_cost: 0 };
         map[ms.date].total_input_tokens += ms.total_input_tokens;
         map[ms.date].total_output_tokens += ms.total_output_tokens;
@@ -315,7 +328,7 @@ export default function StatsPage() {
       return Object.values(map);
     }
     return daily.map((s: any) => ({ ...s, total_cost: dailyCostMap[ds(s.date)] || 0 }));
-  }, [daily, dailyCostMap, filteredModelStats, modelFilter]);
+  }, [daily, dailyCostMap, unfilteredModelStats, modelFilter]);
 
   const filled = fill(dailyWithCost, 7);
   const cDates = filled.map((d:any)=>{const dt=new Date(d.date);return`${dt.getMonth()+1}/${dt.getDate()}`});
@@ -366,8 +379,8 @@ export default function StatsPage() {
     const t=new Date();t.setHours(0,0,0,0);const ts=fd(t);
     const dm:Record<string,number>={};
     if (modelFilter) {
-      // model 筛选激活时，从 filteredModelStats 派生每日合计
-      for (const ms of filteredModelStats) {
+      // model 筛选激活时，从 unfilteredModelStats 派生每日合计
+      for (const ms of unfilteredModelStats) {
         const d = ds(ms.date);
         dm[d] = (dm[d] || 0) + (ms.total_tokens || 0);
       }
@@ -416,9 +429,9 @@ export default function StatsPage() {
       </div>
     ) : (
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card l="今日用量" n="Today" d={modelOverview ? modelOverview.today : data?.today} tr={<Trend c={tt} p={yt}/>} cost={todayCost} hideCost={hideCost} />
-        <Card l="本周用量" n="Week" d={modelOverview ? modelOverview.week : data?.week} tr={<Trend c={wt} p={lwt}/>} cost={weekCost} hideCost={hideCost} />
-        <Card l="总计用量" n="Total" d={modelOverview ? modelOverview.total : data?.total} tr={null} cost={totalCost} hideCost={hideCost} />
+        <Card l="今日用量" n="Today" d={modelOverview ? modelOverview.today : data?.today} tr={<Trend c={tt} p={yt}/>} cost={cardTodayCost} hideCost={hideCost} />
+        <Card l="本周用量" n="Week" d={modelOverview ? modelOverview.week : data?.week} tr={<Trend c={wt} p={lwt}/>} cost={cardWeekCost} hideCost={hideCost} />
+        <Card l="总计用量" n="Total" d={modelOverview ? modelOverview.total : data?.total} tr={null} cost={cardTotalCost} hideCost={hideCost} />
       </div>
     )}
 
