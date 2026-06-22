@@ -52,7 +52,7 @@ func connectDB(cfg *config.Config) (*gorm.DB, string) {
 	slog.Info("正在连接 MySQL 数据库...")
 
 	// 带重试的 MySQL 连接
-	retryInterval := []time.Duration{1 * time.Second, 3 * time.Second, 5 * time.Second}
+	retryInterval := []time.Duration{1 * time.Second, 3 * time.Second, 5 * time.Second, 7 * time.Second, 9 * time.Second}
 	for i, interval := range retryInterval {
 		db, err = gorm.Open(mysql.Open(cfg.DSN()), &gorm.Config{})
 		if err == nil {
