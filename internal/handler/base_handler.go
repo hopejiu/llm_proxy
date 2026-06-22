@@ -61,6 +61,9 @@ func (h *BaseHandler) HandleProxyRequest(
 		return
 	}
 
+	// Auto 模型解析：当客户端请求 model=auto 时替换为配置的默认模型
+	body = h.proxyService.ResolveAutoModel(body, h.cfg.GetAutoModel())
+
 	// 会话ID 解析：提取标记 → 清洗 body → 存入 context
 	var sessionID uint
 	if h.sessionSvc != nil {

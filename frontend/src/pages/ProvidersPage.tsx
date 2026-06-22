@@ -1,5 +1,5 @@
-import { useState, useCallback, useMemo, useRef } from "react";
-import { ProviderAPI } from "../services";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
+import { ProviderAPI, AppAPI } from "../services";
 import { useProviders } from "../hooks/useProviders";
 import { useToast } from "../components/Toast";
 import LoadingSpinner from "../components/LoadingSpinner";
@@ -293,6 +293,51 @@ export default function ProvidersPage() {
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   const formId = useRef(0); // force re-mount for editor state reset
 
+  // Auto 默认模型
+  const [autoModel, setAutoModel] = useState<string>("");
+  const [autoSaving, setAutoSaving] = useState(false);
+  const [autoLoaded, setAutoLoaded] = useState(false);
+
+  // Fetch auto model config on mount（不依赖 providers，确保独立加载持久化值）
+  useEffect(() => {
+    if (!autoLoaded) {
+      AppAPI.getAutoModel().then((v: string) => {
+        setAutoModel(v || "");
+        setAutoLoaded(true);
+      }).catch(() => setAutoLoaded(true));
+    }
+  }, [autoLoaded]);
+
+  // Auto model dropdown options: "0"=未配置, "pid:modelName"=模型
+  const autoModelOptions = useMemo(() => {
+    const opts: { value: string; label: string }[] = [
+      { value: "0", label: "未配置（禁用 auto）" },
+    ];
+    for (const p of providers) {
+      let models: any[] = [];
+      try { models = JSON.parse(p.models || "[]"); } catch { models = []; }
+      for (const m of models) {
+        if (m.name) {
+          opts.push({ value: `${p.id}:${m.name}`, label: `${p.name} / ${m.name}` });
+        }
+      }
+    }
+    return opts;
+  }, [providers]);
+
+  const handleAutoModelChange = useCallback(async (val: string) => {
+    const newVal = val === "0" ? "" : val;
+    setAutoModel(newVal);
+    setAutoSaving(true);
+    try {
+      await AppAPI.setAutoModel(newVal);
+    } catch (e: any) {
+      logger.error("保存 Auto 模型失败", { error: e?.message || String(e) });
+    } finally {
+      setAutoSaving(false);
+    }
+  }, []);
+
   // Test connection
   const [testStatus, setTestStatus] = useState<{
     loading: boolean;
@@ -585,6 +630,36 @@ export default function ProvidersPage() {
         <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="搜索 Provider 名称或模型..." className="input-field pl-8 text-xs" aria-label="搜索 Provider" />
       </div>
 
+      {/* Auto 默认模型 */}
+      <div className="section-card mb-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-[#1E1B2E]">Auto 默认模型</h3>
+            <p className="text-xs text-[#9C94B0] mt-0.5">客户端请求 model=auto 时自动使用的模型</p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <select
+              value={autoModel || "0"}
+              onChange={(e) => handleAutoModelChange(e.target.value)}
+              className="input-field text-xs"
+              disabled={autoSaving}
+            >
+              {autoModelOptions.map((o, i) => (
+                <option key={i} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            {autoSaving && (
+              <svg className="w-4 h-4 animate-spin text-brand-600 shrink-0" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            )}
+          </div>
+        </div>
+      </div>
+
       <div className="section-card">
         {loading ? (
           <LoadingSpinner />
@@ -836,11 +911,10 @@ export default function ProvidersPage() {
             </div>
             {testStatus.message && (
               <div
-                className={`px-3 py-2 rounded-lg text-xs leading-relaxed ${
-                  testStatus.ok
+                className={`px-3 py-2 rounded-lg text-xs leading-relaxed ${testStatus.ok
                     ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
                     : "bg-red-50 text-red-600 border border-red-200"
-                }`}
+                  }`}
               >
                 {testStatus.message}
               </div>
@@ -912,9 +986,8 @@ export default function ProvidersPage() {
                     return (
                       <label
                         key={name}
-                        className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer transition-colors ${
-                          exists ? "opacity-40 cursor-not-allowed bg-[#FAF5FF]" : "hover:bg-brand-50/40"
-                        }`}
+                        className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer transition-colors ${exists ? "opacity-40 cursor-not-allowed bg-[#FAF5FF]" : "hover:bg-brand-50/40"
+                          }`}
                       >
                         <input
                           type="checkbox"
@@ -930,8 +1003,8 @@ export default function ProvidersPage() {
                   })}
                 {fetchModels.filter((m) => !fetchSearch || m.toLowerCase().includes(fetchSearch.toLowerCase())).length ===
                   0 && (
-                  <div className="text-center py-6 text-xs text-[#9C94B0]">无匹配的模型</div>
-                )}
+                    <div className="text-center py-6 text-xs text-[#9C94B0]">无匹配的模型</div>
+                  )}
               </div>
             </>
           )}

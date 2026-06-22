@@ -36,6 +36,13 @@ export function EnvFileExists(): $CancellablePromise<boolean> {
 }
 
 /**
+ * GetAutoModel 获取 auto 默认模型配置
+ */
+export function GetAutoModel(): $CancellablePromise<string> {
+    return $Call.ByID(1251808398);
+}
+
+/**
  * GetAutostartStatus 获取当前是否已注册开机自启动（以注册表/OS 配置为准）
  */
 export function GetAutostartStatus(): $CancellablePromise<boolean> {
@@ -141,6 +148,13 @@ export function SaveEnvConfig(items: { [_ in string]?: string }): $CancellablePr
  */
 export function SetApp(app: application$0.App | null): $CancellablePromise<void> {
     return $Call.ByID(3487267257, app);
+}
+
+/**
+ * SetAutoModel 设置 auto 默认模型（格式 "providerID:modelName"），持久化到 .env 并热更新
+ */
+export function SetAutoModel(val: string): $CancellablePromise<void> {
+    return $Call.ByID(1411716122, val);
 }
 
 /**

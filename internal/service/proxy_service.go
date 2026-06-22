@@ -65,6 +65,42 @@ func (s *ProxyService) GetProviderByModel(modelName string) (model.ProviderConfi
 	return model.ProviderConfig{}, fmt.Errorf("no provider found for model: %s, available models: %s", modelName, strings.Join(available, ", "))
 }
 
+// ResolveAutoModel 解析请求体中的 model=auto，替换为配置的默认模型。
+// autoModelCfg: 格式 "providerID:modelName"，如 "1:gpt-4"
+func (s *ProxyService) ResolveAutoModel(body []byte, autoModelCfg string) []byte {
+	if autoModelCfg == "" {
+		return body
+	}
+
+	var reqInfo struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal(body, &reqInfo); err != nil || reqInfo.Model != "auto" {
+		return body
+	}
+
+	// 解析配置值
+	parts := strings.SplitN(autoModelCfg, ":", 2)
+	if len(parts) != 2 || parts[1] == "" {
+		return body
+	}
+	resolvedModel := parts[1]
+
+	// 替换 body 中的 model 字段
+	var reqMap map[string]interface{}
+	if err := json.Unmarshal(body, &reqMap); err != nil {
+		return body
+	}
+	reqMap["model"] = resolvedModel
+	newBody, err := json.Marshal(reqMap)
+	if err != nil {
+		slog.Error("ResolveAutoModel 序列化失败", "error", err)
+		return body
+	}
+	slog.Info("Auto 模型已解析", "from", "auto", "to", resolvedModel)
+	return newBody
+}
+
 // PrepareRequestBody 准备请求体，替换model为匹配的上游模型名，合并模型级ExtraParams
 func (s *ProxyService) PrepareRequestBody(reqBody []byte, provider model.ProviderConfig) []byte {
 	var reqInfo struct {

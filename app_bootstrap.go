@@ -92,6 +92,9 @@ func migrateDB(db *gorm.DB, cfg *config.Config) {
 		createSQLiteTablesIfNotExist(db)
 	}
 
+	// 在 AutoMigrate 之前先删除旧索引，避免唯一索引冲突
+	dropOldHourlyIndexes(db, cfg)
+
 	if err := db.AutoMigrate(&model.ProviderConfig{}, &model.RequestLog{}, &model.HourlyStat{}, &model.ChatSession{}); err != nil {
 		fatalMessageBox("启动失败", "数据库初始化失败: "+err.Error())
 	}
@@ -113,8 +116,6 @@ func migrateDB(db *gorm.DB, cfg *config.Config) {
 			slog.Info("已删除旧的外键约束 fk_request_logs_provider")
 		}
 	}
-
-	dropOldHourlyIndexes(db, cfg)
 	migrateHourlyStats(db, cfg)
 	migrateProviderConfigs(db, cfg)
 	migrateExtraParamsToggle(db, cfg)
@@ -125,14 +126,12 @@ func migrateDB(db *gorm.DB, cfg *config.Config) {
 
 func dropOldHourlyIndexes(db *gorm.DB, cfg *config.Config) {
 	if !cfg.IsSQLite() {
-		var idxCount int64
-		db.Raw("SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'hourly_stats' AND INDEX_NAME = 'idx_hour_provider'").Scan(&idxCount)
-		if idxCount > 0 {
-			if err := db.Exec("ALTER TABLE hourly_stats DROP INDEX idx_hour_provider").Error; err != nil {
-				slog.Warn("删除旧索引 idx_hour_provider 失败", "error", err)
-			} else {
-				slog.Info("已删除旧的唯一索引 idx_hour_provider(hour, provider_id)，使用 idx_hour_provider_model(hour, provider_id, model) 替代")
-			}
+		// 直接尝试删除旧索引，不依赖 information_schema 查询（某些 MySQL 版本/权限下可能检测不到）
+		if err := db.Exec("ALTER TABLE hourly_stats DROP INDEX idx_hour_provider").Error; err != nil {
+			// 错误码 1091 = "Can't DROP INDEX; check that it exists"，属于正常情况
+			slog.Debug("删除旧索引 idx_hour_provider（可能不存在）", "error", err)
+		} else {
+			slog.Info("已删除旧的唯一索引 idx_hour_provider(hour, provider_id)，使用 idx_hour_provider_model(hour, provider_id, model) 替代")
 		}
 	} else {
 		if err := db.Exec("DROP INDEX IF EXISTS idx_hourly_stats_hour").Error; err != nil {
