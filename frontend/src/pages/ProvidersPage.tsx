@@ -298,15 +298,15 @@ export default function ProvidersPage() {
   const [autoSaving, setAutoSaving] = useState(false);
   const [autoLoaded, setAutoLoaded] = useState(false);
 
-  // Fetch auto model config on providers load
+  // Fetch auto model config on mount（不依赖 providers，确保独立加载持久化值）
   useEffect(() => {
-    if (!autoLoaded && providers.length > 0) {
+    if (!autoLoaded) {
       AppAPI.getAutoModel().then((v: string) => {
         setAutoModel(v || "");
         setAutoLoaded(true);
       }).catch(() => setAutoLoaded(true));
     }
-  }, [providers, autoLoaded]);
+  }, [autoLoaded]);
 
   // Auto model dropdown options: "0"=未配置, "pid:modelName"=模型
   const autoModelOptions = useMemo(() => {
