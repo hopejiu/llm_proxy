@@ -125,15 +125,11 @@ export default function RealtimePage() {
     };
   }, [fetchData]);
 
-  // 轮询：仅用于"最近完成的请求"，每 2s 刷新；有正在进行的请求时跳过
-  // 通过 ref 读取最新 streamingCount，避免依赖变化导致 interval 重建
+  // 轮询：每 2s 刷新"最近完成的请求"列表
+  // 活跃请求已通过 Wails 事件实时推送，此处独立轮询最近完成的请求
   useEffect(() => {
     autoRef.current = setInterval(async () => {
       const now = new Date().toLocaleTimeString();
-      if (streamingCountRef.current > 0) {
-        setUpdateTime(now);
-        return;
-      }
       try {
         const logs = await StatsAPI.getRecentLogs(30);
         setRecentLogs(logs || []);
