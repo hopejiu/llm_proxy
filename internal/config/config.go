@@ -283,6 +283,8 @@ func Load() *Config {
 
 		AutoStartProxy: getEnvBool("AUTO_START_PROXY", true),
 		AutoStartApp:   getEnvBool("AUTO_START_APP", false),
+
+		AutoModel: getEnv("AUTO_MODEL", ""),
 	}
 
 	// SQLite 路径：如果是相对路径，改为基于应用数据目录
