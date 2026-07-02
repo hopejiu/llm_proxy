@@ -67,13 +67,14 @@ export default function RecentRequestsTable({ logs, showTps = false, showCost = 
     { id: "created_at", key: "created_at", label: "时间", className: "text-[#6B6580] font-mono text-xs whitespace-nowrap", defaultVisible: true },
     { id: "provider", key: "", label: "Provider", className: "", defaultVisible: true },
     { id: "model", key: "model", label: "模型", className: "font-mono text-xs", defaultVisible: true },
-    { id: "input_tokens", key: "input_tokens", label: "Input", className: "text-right font-mono text-xs", defaultVisible: false },
-    { id: "output_tokens", key: "output_tokens", label: "Output", className: "text-right font-mono text-xs", defaultVisible: false },
-    { id: "cached_tokens", key: "cached_tokens", label: "Cached", className: "text-right font-mono text-xs text-emerald-600", defaultVisible: false },
+    { id: "input_tokens", key: "input_tokens", label: "输入", className: "text-right font-mono text-xs", defaultVisible: false },
+    { id: "uncached_input", key: "uncached_input", label: "无缓存输入", className: "text-right font-mono text-xs", defaultVisible: false },
+    { id: "output_tokens", key: "output_tokens", label: "输出", className: "text-right font-mono text-xs", defaultVisible: false },
+    { id: "cached_tokens", key: "cached_tokens", label: "缓存", className: "text-right font-mono text-xs text-emerald-600", defaultVisible: false },
     { id: "cache_rate", key: "cache_rate", label: "命中率", className: "text-right font-mono text-xs text-emerald-500", defaultVisible: false },
-    { id: "total_tokens", key: "total_tokens", label: "Total", className: "text-right font-mono text-xs font-bold text-brand-700", defaultVisible: true },
+    { id: "total_tokens", key: "total_tokens", label: "总计", className: "text-right font-mono text-xs font-bold text-brand-700", defaultVisible: true },
     { id: "duration", key: "duration", label: "耗时", className: "text-right font-mono text-xs", defaultVisible: true },
-    ...(showTps ? [{ id: "tps", key: "tps", label: "Token/s", className: "text-right font-mono text-xs text-brand-600 font-medium", defaultVisible: true }] : []),
+    ...(showTps ? [{ id: "tps", key: "tps", label: "词元/s", className: "text-right font-mono text-xs text-brand-600 font-medium", defaultVisible: true }] : []),
     ...(showCost ? [{ id: "_cost", key: "_cost", label: "花费", className: "text-right font-mono text-xs text-emerald-600", defaultVisible: false }] : []),
     { id: "status", key: "status", label: "状态", className: "text-center", defaultVisible: true },
     { id: "actions", key: "", label: "操作", className: "text-center", defaultVisible: true },
@@ -131,6 +132,12 @@ export default function RecentRequestsTable({ logs, showTps = false, showCost = 
     if (key === "model") return log.model;
     if (key === "provider_name") return log.provider_name || "-";
     if (key === "_cost") return fmtYuan(log._cost || 0);
+    if (key === "uncached_input") {
+      const inp = log.input_tokens;
+      const cached = log.cached_tokens || 0;
+      if (inp == null) return "-";
+      return (inp - cached).toLocaleString();
+    }
     if (["input_tokens", "output_tokens", "cached_tokens", "total_tokens"].includes(key)) {
       const val = log[key];
       return val != null ? Number(val).toLocaleString() : "-";
@@ -277,8 +284,8 @@ export default function RecentRequestsTable({ logs, showTps = false, showCost = 
                   ["Provider", ld.provider_name],
                   ["模型", ld.model],
                   ["状态", ld.status],
-                  ["Token", ld.input_tokens != null ? `输入 ${ld.input_tokens} / 输出 ${ld.output_tokens} / 总计 ${ld.total_tokens}` : "-"],
-                  ["缓存 Token", ld.cached_tokens > 0 ? `${ld.cached_tokens} (${ld.input_tokens > 0 ? (ld.cached_tokens / ld.input_tokens * 100).toFixed(1) + "%" : "-"})` : undefined],
+                  ["词元", ld.input_tokens != null ? `输入 ${ld.input_tokens} / 输出 ${ld.output_tokens} / 总计 ${ld.total_tokens}` : "-"],
+                  ["缓存词元", ld.cached_tokens > 0 ? `${ld.cached_tokens} (${ld.input_tokens > 0 ? (ld.cached_tokens / ld.input_tokens * 100).toFixed(1) + "%" : "-"})` : undefined],
                   ["错误信息", ld.error_message],
                   ["耗时", ld.duration > 0 ? `${(ld.duration / 1000).toFixed(1)}s` : "-"],
                 ].filter(([, v]) => v != null && v !== "").map(([label, value]) => (
