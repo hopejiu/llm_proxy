@@ -98,15 +98,20 @@ function Card({ l, n, d, tr, cost, hideCost }: any) {
           ))}
         </div>
         <div className="grid grid-cols-2 gap-x-3">
-          {row2.map(({ k, lab }) => (
-            <div key={k} className="min-w-0">
-              <span className="text-[10px] text-[#9C94B0]">{lab}</span>
-              <p className="text-sm font-semibold mt-0.5 truncate text-[#1E1B2E]"
-                title={d?.total_input_tokens != null ? (d.total_input_tokens - (d.total_cached_tokens || 0)).toLocaleString() : "-"}>
-                {d?.total_input_tokens != null ? (d.total_input_tokens - (d.total_cached_tokens || 0)).toLocaleString() : "-"}
-              </p>
-            </div>
-          ))}
+          {row2.map(({ k, lab }) => {
+            const val = k === "uncached_input"
+              ? (d?.total_input_tokens != null ? d.total_input_tokens - (d.total_cached_tokens || 0) : null)
+              : d?.[k];
+            return (
+              <div key={k} className="min-w-0">
+                <span className="text-[10px] text-[#9C94B0]">{lab}</span>
+                <p className="text-sm font-semibold mt-0.5 truncate text-[#1E1B2E]"
+                  title={val != null ? Number(val).toLocaleString() : "-"}>
+                  {val != null ? Number(val).toLocaleString() : "-"}
+                </p>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
